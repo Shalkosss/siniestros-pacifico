@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\\\Users\\\\USER\\\\Downloads\\\\Kaban Pacifico\")",
+      "Bash(npm --version)"
+    ]
+  }
+}
