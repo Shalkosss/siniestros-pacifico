@@ -9,6 +9,7 @@ import { Button } from './ui/Button';
 import { Textarea, Input } from './ui/Input';
 import { cn, colorPorDias, diasDesde, formatFecha, formatMoneda } from '@/lib/utils';
 import {
+  puedeArchivar,
   puedeBorrarPDF,
   puedeBorrarSiniestro,
   puedeEditarCampos,
@@ -23,11 +24,17 @@ interface Props {
   onChanged: () => void;
 }
 
-/** Gradient del header por tipo */
+/** Tinte sutil del header por tipo — alineado al dark del kanban */
 const accentByTipo: Record<Siniestro['tipo'], string> = {
-  pago:      'from-cyan-700 via-cyan-600 to-cyan-500',
-  deducible: 'from-amber-700 via-amber-600 to-amber-500',
-  reembolso: 'from-violet-700 via-violet-600 to-violet-500',
+  pago:      'from-cyan-500/15 via-cyan-500/10 to-transparent border-b border-cyan-500/20',
+  deducible: 'from-amber-500/15 via-amber-500/10 to-transparent border-b border-amber-500/20',
+  reembolso: 'from-violet-500/15 via-violet-500/10 to-transparent border-b border-violet-500/20',
+};
+
+const accentTextByTipo: Record<Siniestro['tipo'], string> = {
+  pago:      'text-cyan-300',
+  deducible: 'text-amber-300',
+  reembolso: 'text-violet-300',
 };
 
 const tipoLabel: Record<Siniestro['tipo'], string> = {
@@ -60,6 +67,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
   const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
+  const [confirmandoArchivar, setConfirmandoArchivar] = useState(false);
   const [verHistorial, setVerHistorial] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -71,6 +79,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     setCorreoAsegurado(siniestro.correo_asegurado ?? '');
     setEditMode(false);
     setConfirmandoBorrado(false);
+    setConfirmandoArchivar(false);
     setVerHistorial(false);
   }, [siniestro.id]);
 
@@ -86,7 +95,9 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const canUpload = puedeSubirPDF(usuario, siniestro);
   const canDelete = puedeBorrarPDF(usuario, siniestro);
   const canDeleteSiniestro = puedeBorrarSiniestro(usuario);
+  const canArchive = puedeArchivar(usuario);
   const isFinal = esEtapaFinal(siniestro.tipo, siniestro.estado);
+  const isArchivado = !!siniestro.archived_at;
   const puedeMoverEnGeneral = usuario?.rol === 'admin' || usuario?.rol === 'terceros';
 
   const diasAbierto = diasDesde(siniestro.created_at);
@@ -165,17 +176,53 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     if (window.location.pathname.startsWith('/siniestro/')) router.push('/');
   }
 
+  async function archivar() {
+    if (!canArchive) return;
+    const ts = new Date().toISOString();
+    const { error } = await supabase
+      .from('siniestros')
+      .update({ archived_at: ts })
+      .eq('id', siniestro.id);
+    if (error) { alert('Error: ' + error.message); return; }
+    await supabase.from('siniestro_movimientos').insert({
+      siniestro_id: siniestro.id,
+      estado_anterior: siniestro.estado,
+      estado_nuevo: siniestro.estado,
+      movido_por: usuario?.nombre ?? 'sistema',
+      notas: 'Archivado al histórico',
+    });
+    onClose();
+    onChanged();
+  }
+
+  async function desarchivar() {
+    if (!canArchive) return;
+    const { error } = await supabase
+      .from('siniestros')
+      .update({ archived_at: null })
+      .eq('id', siniestro.id);
+    if (error) { alert('Error: ' + error.message); return; }
+    await supabase.from('siniestro_movimientos').insert({
+      siniestro_id: siniestro.id,
+      estado_anterior: siniestro.estado,
+      estado_nuevo: siniestro.estado,
+      movido_por: usuario?.nombre ?? 'sistema',
+      notas: 'Restaurado del histórico',
+    });
+    onChanged();
+  }
+
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60 backdrop-blur-sm fade-in" onClick={onClose}>
       <aside
-        className="h-full w-full max-w-xl overflow-y-auto bg-white shadow-2xl"
+        className="h-full w-full max-w-xl overflow-y-auto bg-ink-800 border-l border-white/10 shadow-2xl text-slate-200"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header compacto con accent por tipo */}
-        <div className={cn('bg-gradient-to-br px-5 py-4 text-white relative', accentByTipo[siniestro.tipo])}>
+        {/* Header — fondo dark con tinte por tipo */}
+        <div className={cn('bg-gradient-to-b px-5 py-4 relative', accentByTipo[siniestro.tipo])}>
           <button
             onClick={onClose}
-            className="absolute top-3 right-3 rounded-full p-1.5 text-white/80 hover:bg-white/15 hover:text-white"
+            className="absolute top-3 right-3 rounded-full p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition"
             aria-label="Cerrar"
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -183,15 +230,18 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             </svg>
           </button>
 
-          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/75">
+          <div className={cn('text-[10px] font-semibold uppercase tracking-[0.16em]', accentTextByTipo[siniestro.tipo])}>
             {tipoLabel[siniestro.tipo]}
+            {isArchivado && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[9px] text-slate-300 normal-case tracking-normal">
+                Archivado
+              </span>
+            )}
           </div>
-          {/* Número siniestro: 1.5rem en vez de 3xl */}
-          <h2 className="mt-0.5 font-mono text-2xl font-bold tracking-tight leading-tight">
+          <h2 className="mt-0.5 font-mono text-2xl font-bold tracking-tight leading-tight text-white">
             {siniestro.codigo}
           </h2>
 
-          {/* Fila compacta de métricas */}
           <div className="mt-4 grid grid-cols-3 gap-3">
             <Metric
               label="Tiempo abierto"
@@ -214,15 +264,14 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             />
           </div>
 
-          <div className="mt-3 text-[11px] text-white/75">
-            Creado {formatFecha(siniestro.created_at)} por <strong className="text-white">{siniestro.solicitante}</strong>
+          <div className="mt-3 text-[11px] text-slate-400">
+            Creado {formatFecha(siniestro.created_at)} por <strong className="text-slate-200">{siniestro.solicitante}</strong>
           </div>
         </div>
 
-        <div className="space-y-5 px-5 py-5 bg-white text-slate-800">
-          {/* Tip drag — texto pequeño muted, no banner */}
-          {puedeMoverEnGeneral && !isFinal && (
-            <p className="text-[11px] text-slate-400 -mt-1">
+        <div className="space-y-5 px-5 py-5">
+          {puedeMoverEnGeneral && !isFinal && !isArchivado && (
+            <p className="text-[11px] text-slate-500 -mt-1">
               Tip: arrastra la tarjeta entre columnas del tablero para mover de etapa.
             </p>
           )}
@@ -230,11 +279,11 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
           {/* Datos */}
           <section>
             <div className="flex items-center justify-between mb-2.5">
-              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Datos</h3>
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Datos</h3>
               {canEdit && !editMode && (
                 <button
                   onClick={() => setEditMode(true)}
-                  className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                  className="grid h-7 w-7 place-items-center rounded-md text-slate-500 hover:text-white hover:bg-white/10 transition"
                   title="Editar"
                 >
                   <PencilIcon />
@@ -276,7 +325,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                 <Textarea label="Notas" value={notas} onChange={(e) => setNotas(e.target.value)} rows={3} />
               </div>
             ) : (
-              <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+              <div className="rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5">
                 <DataLine label="Monto" value={formatMoneda(siniestro.monto)} highlight />
                 <DataLine label="Asegurado / tercero" value={siniestro.asegurado_nombre ?? '—'} />
                 {siniestro.tipo !== 'deducible' ? (
@@ -293,7 +342,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
           {/* PDFs */}
           <section>
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                 PDFs ({siniestro.pdf_urls.length})
               </h3>
               {canUpload && (
@@ -306,14 +355,14 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                     className="hidden"
                     onChange={(e) => onUploadPDFs(e.target.files)}
                   />
-                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-slate-800 transition">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-white/15 transition">
                     {subiendo ? 'Subiendo…' : '+ Adjuntar'}
                   </span>
                 </label>
               )}
             </div>
             {siniestro.pdf_urls.length === 0 ? (
-              <p className="text-xs text-slate-400">Sin archivos.</p>
+              <p className="text-xs text-slate-500">Sin archivos.</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {siniestro.pdf_urls.map((url) => {
@@ -321,23 +370,23 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                   return (
                     <div
                       key={url}
-                      className="group inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 pl-2 pr-1 py-1 text-xs"
+                      className="group inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] pl-2 pr-1 py-1 text-xs"
                     >
-                      <svg className="h-3.5 w-3.5 text-red-500 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                      <svg className="h-3.5 w-3.5 text-red-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M4 4a2 2 0 012-2h6.586A2 2 0 0114 2.586L17.414 6A2 2 0 0118 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                       </svg>
                       <a
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-slate-700 hover:text-pacifico-primary hover:underline max-w-[180px] truncate"
+                        className="text-slate-300 hover:text-cyan-300 hover:underline max-w-[180px] truncate"
                       >
                         {name}
                       </a>
                       {canDelete && (
                         <button
                           onClick={() => eliminarPDF(url)}
-                          className="ml-1 rounded p-0.5 text-slate-300 hover:bg-red-100 hover:text-red-600 transition"
+                          className="ml-1 rounded p-0.5 text-slate-500 hover:bg-red-500/15 hover:text-red-400 transition"
                           title="Eliminar"
                         >
                           <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
@@ -352,12 +401,12 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             )}
           </section>
 
-          {/* Historial — colapsado por defecto */}
+          {/* Historial */}
           {movimientos.length > 0 && (
             <section>
               <button
                 onClick={() => setVerHistorial((v) => !v)}
-                className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 hover:text-slate-800 transition"
+                className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-white transition"
               >
                 <svg
                   className={cn('h-3 w-3 transition-transform', verHistorial && 'rotate-90')}
@@ -369,29 +418,34 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                 Ver historial ({movimientos.length} {movimientos.length === 1 ? 'movimiento' : 'movimientos'})
               </button>
               {verHistorial && (
-                <ol className="mt-3 relative space-y-2 border-l-2 border-slate-200 pl-4 slide-in">
+                <ol className="mt-3 relative space-y-2 border-l-2 border-white/10 pl-4 slide-in">
                   {movimientos.map((m) => (
                     <li key={m.id} className="relative">
-                      <span className="absolute -left-[22px] top-1 grid h-3 w-3 place-items-center rounded-full bg-white border-2 border-slate-400">
-                        <span className="h-1 w-1 rounded-full bg-slate-400" />
+                      <span className="absolute -left-[22px] top-1 grid h-3 w-3 place-items-center rounded-full bg-ink-800 border-2 border-slate-500">
+                        <span className="h-1 w-1 rounded-full bg-slate-500" />
                       </span>
                       <div className="text-xs">
-                        <div className="text-slate-700">
-                          {m.estado_anterior ? (
+                        <div className="text-slate-300">
+                          {m.estado_anterior && m.estado_anterior !== m.estado_nuevo ? (
                             <>
-                              <span className="text-slate-400">{m.estado_anterior}</span>
-                              <span className="mx-1 text-slate-300">→</span>
+                              <span className="text-slate-500">{m.estado_anterior}</span>
+                              <span className="mx-1 text-slate-600">→</span>
+                              <span className="font-medium text-slate-200">{m.estado_nuevo}</span>
                             </>
+                          ) : m.notas ? (
+                            <span className="text-slate-400 italic">{m.notas}</span>
                           ) : (
-                            <span className="text-slate-400">Creado · </span>
+                            <>
+                              <span className="text-slate-500">Creado · </span>
+                              <span className="font-medium text-slate-200">{m.estado_nuevo}</span>
+                            </>
                           )}
-                          <span className="font-medium">{m.estado_nuevo}</span>
                         </div>
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-[11px] text-slate-500">
                           {m.movido_por} · {formatFecha(m.timestamp)}
                         </div>
-                        {m.notas && (
-                          <div className="mt-1 rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-600">
+                        {m.notas && m.estado_anterior !== m.estado_nuevo && (
+                          <div className="mt-1 rounded bg-white/5 px-2 py-1 text-[11px] text-slate-400">
                             {m.notas}
                           </div>
                         )}
@@ -403,13 +457,54 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             </section>
           )}
 
+          {/* Acciones de archivo (pacífico: admin/terceros) */}
+          {canArchive && (
+            <section className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+              {isArchivado ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400">
+                    Este siniestro está archivado. Restaurarlo lo devolverá al tablero.
+                  </p>
+                  <Button variant="outline" size="sm" onClick={desarchivar}>
+                    Restaurar al tablero
+                  </Button>
+                </div>
+              ) : !confirmandoArchivar ? (
+                <button
+                  onClick={() => setConfirmandoArchivar(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-white transition"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M4 3a2 2 0 00-2 2v1a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4z" />
+                    <path fillRule="evenodd" d="M3 9h14v6a2 2 0 01-2 2H5a2 2 0 01-2-2V9zm5 2a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Mandar a histórico
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-300">
+                    El siniestro desaparece del tablero y queda solo en el histórico. Puedes restaurarlo después.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={archivar}>
+                      Sí, archivar
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setConfirmandoArchivar(false)}>
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Zona peligrosa (admin) */}
           {canDeleteSiniestro && (
-            <section className="rounded-lg border border-red-200 bg-red-50/60 p-3">
+            <section className="rounded-lg border border-red-500/30 bg-red-500/[0.06] p-3">
               {!confirmandoBorrado ? (
                 <button
                   onClick={() => setConfirmandoBorrado(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-red-700 hover:underline"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-red-300 hover:text-red-200 transition"
                 >
                   <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9z" clipRule="evenodd" />
@@ -418,7 +513,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                 </button>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-xs text-red-800">
+                  <p className="text-xs text-red-200">
                     Borra el siniestro, su historial y sus PDFs. No se puede deshacer.
                   </p>
                   <div className="flex gap-2">
@@ -442,9 +537,9 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
 function Metric({ label, value, subtitle }: { label: string; value: React.ReactNode; subtitle?: string }) {
   return (
     <div>
-      <div className="text-[10px] font-medium uppercase tracking-[0.10em] text-white/70">{label}</div>
-      <div className="mt-0.5 text-[15px] font-semibold leading-tight">{value}</div>
-      {subtitle && <div className="mt-0.5 text-[10px] text-white/70 truncate">{subtitle}</div>}
+      <div className="text-[10px] font-medium uppercase tracking-[0.10em] text-slate-400">{label}</div>
+      <div className="mt-0.5 text-[15px] font-semibold leading-tight text-white">{value}</div>
+      {subtitle && <div className="mt-0.5 text-[10px] text-slate-400 truncate">{subtitle}</div>}
     </div>
   );
 }
@@ -465,9 +560,9 @@ function DataLine({
       <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500 pt-0.5 shrink-0">{label}</span>
       <span
         className={cn(
-          'text-right text-slate-800',
+          'text-right text-slate-200',
           multiline && 'whitespace-pre-wrap text-left max-w-[60%]',
-          highlight && 'font-semibold text-slate-900'
+          highlight && 'font-semibold text-white'
         )}
       >
         {value}

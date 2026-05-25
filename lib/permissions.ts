@@ -38,6 +38,15 @@ export function puedeBorrarSiniestro(usuario: Usuario | null): boolean {
 }
 
 /**
+ * Mandar a histórico: solo el equipo de Pacífico (admin / terceros).
+ * Los abogados no pueden archivar.
+ */
+export function puedeArchivar(usuario: Usuario | null): boolean {
+  if (!usuario) return false;
+  return usuario.rol === 'admin' || usuario.rol === 'terceros';
+}
+
+/**
  * ¿Puede este usuario mover este siniestro a la siguiente etapa?
  */
 export function puedeMover(usuario: Usuario | null, siniestro: Siniestro): boolean {

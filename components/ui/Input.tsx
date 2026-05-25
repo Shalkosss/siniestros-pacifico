@@ -15,7 +15,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-slate-700">
+          <label htmlFor={inputId} className="block text-xs font-medium text-slate-400">
             {label}
           </label>
         )}
@@ -23,8 +23,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            'w-full rounded-lg border border-surface-border bg-white px-3 py-2 text-sm shadow-sm transition focus:border-pacifico-primary focus:outline-none focus:ring-2 focus:ring-pacifico-secondary/30',
-            error && 'border-accent-danger focus:border-accent-danger focus:ring-red-200',
+            'w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-pacifico-secondary/60 focus:outline-none focus:ring-2 focus:ring-pacifico-secondary/20',
+            error && 'border-accent-danger focus:border-accent-danger focus:ring-red-500/20',
             className
           )}
           {...props}
@@ -49,7 +49,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-slate-700">
+          <label htmlFor={inputId} className="block text-xs font-medium text-slate-400">
             {label}
           </label>
         )}
@@ -57,8 +57,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            'w-full rounded-lg border border-surface-border bg-white px-3 py-2 text-sm shadow-sm transition focus:border-pacifico-primary focus:outline-none focus:ring-2 focus:ring-pacifico-secondary/30',
-            error && 'border-accent-danger focus:ring-red-200',
+            'w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-pacifico-secondary/60 focus:outline-none focus:ring-2 focus:ring-pacifico-secondary/20',
+            error && 'border-accent-danger focus:ring-red-500/20',
             className
           )}
           {...props}

@@ -19,15 +19,5 @@ export default function HomePage() {
   if (!usuario) return null;
   if (!puedeVerRuta(usuario, '/')) return null;
 
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Tablero</h1>
-        <p className="text-sm text-white/60">
-          Arrastra las tarjetas entre columnas para mover de etapa.
-        </p>
-      </div>
-      <KanbanBoard />
-    </div>
-  );
+  return <KanbanBoard />;
 }

@@ -158,6 +158,7 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
   const siniestrosTemporal = useMemo(() => {
     if (modoHistorico) return siniestrosEnScope;
     return siniestrosEnScope.filter((s) => {
+      if (s.archived_at) return false;
       if (!s.closed_at) return true;
       return diasDesde(s.closed_at) <= 7;
     });
@@ -190,6 +191,8 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
   const scopesUsuario = scopesDisponibles(usuario);
   const draggableActivo =
     !modoHistorico && !!usuario && (usuario.rol === 'admin' || usuario.rol === 'terceros');
+  // Los abogados ven una vista simplificada: solo chips de tipo, sin buscar/filtros/vistas
+  const vistaSimplificada = !!usuario && usuario.rol === 'abogado';
 
   // ---------- Drag & drop ----------
   function onDragStart(e: DragStartEvent) {
@@ -273,57 +276,63 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
           })}
         </ChipGroup>
 
-        <ChipGroup>
-          <button
-            onClick={() => setMode('compacto')}
-            className={cn(
-              'grid place-items-center rounded-md h-7 w-8 transition',
-              mode === 'compacto' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'
-            )}
-            title="Vista compacta"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg>
-          </button>
-          <button
-            onClick={() => setMode('detallado')}
-            className={cn(
-              'grid place-items-center rounded-md h-7 w-8 transition',
-              mode === 'detallado' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'
-            )}
-            title="Vista detallada"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 9a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3z" /></svg>
-          </button>
-        </ChipGroup>
+        {!vistaSimplificada && (
+          <ChipGroup>
+            <button
+              onClick={() => setMode('compacto')}
+              className={cn(
+                'grid place-items-center rounded-md h-7 w-8 transition',
+                mode === 'compacto' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'
+              )}
+              title="Vista compacta"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg>
+            </button>
+            <button
+              onClick={() => setMode('detallado')}
+              className={cn(
+                'grid place-items-center rounded-md h-7 w-8 transition',
+                mode === 'detallado' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'
+              )}
+              title="Vista detallada"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 9a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3z" /></svg>
+            </button>
+          </ChipGroup>
+        )}
 
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" /></svg>
-          <input
-            type="text"
-            placeholder="Buscar..."
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="w-48 rounded-lg bg-white/[0.03] border border-white/[0.06] px-9 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-white/20 focus:bg-white/[0.05]"
-          />
-        </div>
+        {!vistaSimplificada && (
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" /></svg>
+            <input
+              type="text"
+              placeholder="Buscar..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-48 rounded-lg bg-white/[0.03] border border-white/[0.06] px-9 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-white/20 focus:bg-white/[0.05]"
+            />
+          </div>
+        )}
 
-        <button
-          onClick={() => setFiltrosAbiertos((v) => !v)}
-          className={cn(
-            'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border transition',
-            filtrosAbiertos || hayFiltrosActivos
-              ? 'border-pago/40 bg-pago/10 text-pago'
-              : 'border-white/[0.06] bg-white/[0.03] text-slate-300 hover:bg-white/[0.05]'
-          )}
-        >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" /></svg>
-          Filtros
-          {hayFiltrosActivos && <span className="h-1.5 w-1.5 rounded-full bg-pago" />}
-        </button>
+        {!vistaSimplificada && (
+          <button
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium border transition',
+              filtrosAbiertos || hayFiltrosActivos
+                ? 'border-pago/40 bg-pago/10 text-pago'
+                : 'border-white/[0.06] bg-white/[0.03] text-slate-300 hover:bg-white/[0.05]'
+            )}
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" /></svg>
+            Filtros
+            {hayFiltrosActivos && <span className="h-1.5 w-1.5 rounded-full bg-pago" />}
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-4 text-[11px] font-medium">
           {/* Toggle discreto "Solo míos" — secundario al lado del contador */}
-          {scopesUsuario.includes('mios') && (
+          {!vistaSimplificada && scopesUsuario.includes('mios') && (
             <button
               onClick={() => setScope(scope === 'mios' ? scopeAmplio(usuario) : 'mios')}
               className={cn(
@@ -358,7 +367,7 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
         </div>
       </div>
 
-      {filtrosAbiertos && (
+      {!vistaSimplificada && filtrosAbiertos && (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl panel p-3 slide-in">
           <select
             value={filtroSolicitante}

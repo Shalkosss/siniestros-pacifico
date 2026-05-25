@@ -25,6 +25,7 @@ export interface Siniestro {
   asignado_a: string | null;
   created_at: string;
   closed_at: string | null;
+  archived_at: string | null;
 }
 
 export interface SiniestroMovimiento {
