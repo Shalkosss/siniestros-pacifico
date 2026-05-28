@@ -1,5 +1,9 @@
 # Sistema de Siniestros — Pacífico Seguros
 
+> 📦 **Versión actual:** v4 — ver [CHANGELOG.md](CHANGELOG.md)
+> 🚀 **Deploy:** seguí [DEPLOY.md](DEPLOY.md) paso a paso
+> 📨 **Avisar al equipo:** templates en [TEMPLATE_COMMS.md](TEMPLATE_COMMS.md)
+
 Aplicación Kanban para el área legal: ingreso, seguimiento y cierre de siniestros (Pagos, Reembolsos, Deducibles).
 
 > **Estado**: Fase 1 (MVP) + Fase 2 (notificaciones realtime, dashboard de KPIs, panel admin, navegación por rol, vista compacta/detallada) completadas. Falta Fase 3 (drag&drop, export, auditoría detallada).
