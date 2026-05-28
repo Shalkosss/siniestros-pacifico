@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
@@ -8,7 +8,16 @@ import type { Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
 import { cn, validarCodigo } from '@/lib/utils';
 import { getResponsableDeEtapa } from '@/lib/workflows';
 import { puedeCrearSiniestro } from '@/lib/permissions';
-import { buildAsunto, buildCuerpo, buildMailtoUrl, getDestinatarios } from '@/lib/email';
+import {
+  buildAsunto,
+  buildCuerpo,
+  buildEmailUrl,
+  getDestinatarios,
+  type EmailProvider,
+} from '@/lib/email';
+
+const EMAIL_PROVIDER_KEY = 'pacifico:email-provider';
+const EMAIL_AUTOSEND_KEY = 'pacifico:email-autosend';
 
 const TIPOS: {
   id: TipoSiniestro;
@@ -62,6 +71,22 @@ export function SiniestroForm({ abogados }: Props) {
   const [error, setError] = useState<string | null>(null);
   /** Cuando se crea exitosamente, mostramos la confirmación con preview del correo */
   const [creado, setCreado] = useState<Siniestro | null>(null);
+  const [emailProvider, setEmailProvider] = useState<EmailProvider>('gmail');
+  const [autoEnviar, setAutoEnviar] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const p = localStorage.getItem(EMAIL_PROVIDER_KEY);
+    if (p === 'gmail' || p === 'outlook') setEmailProvider(p);
+    setAutoEnviar(localStorage.getItem(EMAIL_AUTOSEND_KEY) === '1');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem(EMAIL_PROVIDER_KEY, emailProvider);
+  }, [emailProvider]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem(EMAIL_AUTOSEND_KEY, autoEnviar ? '1' : '0');
+  }, [autoEnviar]);
 
   if (!puedeCrearSiniestro(usuario)) {
     return (
@@ -151,8 +176,21 @@ export function SiniestroForm({ abogados }: Props) {
       });
     }
 
+    const siniestroFinal = { ...(created as Siniestro), pdf_urls: pdfUrls };
+
+    if (autoEnviar) {
+      // Dispara el cliente de correo y marca como enviado de inmediato.
+      await supabase.from('siniestros').update({ correo_enviado: true }).eq('id', siniestroFinal.id);
+      const url = buildEmailUrl(siniestroFinal, emailProvider);
+      // Nueva pestaña para Gmail/Outlook web — mailto se ignora window.open, pero ya no usamos mailto.
+      window.open(url, '_blank', 'noopener');
+      router.push('/');
+      router.refresh();
+      return;
+    }
+
     setSubmitting(false);
-    setCreado({ ...(created as Siniestro), pdf_urls: pdfUrls });
+    setCreado(siniestroFinal);
   }
 
   // -------- Vista de confirmación post-creación --------
@@ -160,6 +198,8 @@ export function SiniestroForm({ abogados }: Props) {
     return (
       <ConfirmacionCorreo
         siniestro={creado}
+        providerInicial={emailProvider}
+        onCambioProvider={setEmailProvider}
         onCerrar={() => {
           router.push('/');
           router.refresh();
@@ -350,6 +390,49 @@ export function SiniestroForm({ abogados }: Props) {
         )}
       </div>
 
+      {/* Preferencias de correo de notificación */}
+      <div className="rounded-lg border border-white/[0.06] bg-card/50 p-3 space-y-3">
+        <div>
+          <Label>Cliente de correo</Label>
+          <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1">
+            <ProviderPill active={emailProvider === 'gmail'} onClick={() => setEmailProvider('gmail')}>
+              Gmail
+            </ProviderPill>
+            <ProviderPill active={emailProvider === 'outlook'} onClick={() => setEmailProvider('outlook')}>
+              Outlook
+            </ProviderPill>
+          </div>
+        </div>
+
+        <label className="flex items-start gap-2.5 cursor-pointer select-none">
+          <span
+            onClick={() => setAutoEnviar((v) => !v)}
+            className={cn(
+              'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
+              autoEnviar ? 'border-cyan-500 bg-cyan-500' : 'border-slate-600 bg-card'
+            )}
+          >
+            {autoEnviar && (
+              <svg className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+              </svg>
+            )}
+          </span>
+          <input
+            type="checkbox"
+            checked={autoEnviar}
+            onChange={(e) => setAutoEnviar(e.target.checked)}
+            className="sr-only"
+          />
+          <span className="text-xs text-slate-300 leading-snug">
+            Enviar correo automáticamente al crear el siniestro
+            <span className="block text-[11px] text-slate-500 mt-0.5">
+              Abre {emailProvider === 'gmail' ? 'Gmail' : 'Outlook'} en una pestaña nueva con el correo listo. Solo presionas enviar.
+            </span>
+          </span>
+        </label>
+      </div>
+
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
           {error}
@@ -383,21 +466,30 @@ export function SiniestroForm({ abogados }: Props) {
 
 function ConfirmacionCorreo({
   siniestro,
+  providerInicial,
+  onCambioProvider,
   onCerrar,
 }: {
   siniestro: Siniestro;
+  providerInicial: EmailProvider;
+  onCambioProvider: (p: EmailProvider) => void;
   onCerrar: () => void;
 }) {
   const [marcando, setMarcando] = useState(false);
+  const [provider, setProvider] = useState<EmailProvider>(providerInicial);
   const dest = getDestinatarios(siniestro);
   const asunto = buildAsunto(siniestro);
   const cuerpo = buildCuerpo(siniestro);
-  const mailto = buildMailtoUrl(siniestro);
+
+  function cambiarProvider(p: EmailProvider) {
+    setProvider(p);
+    onCambioProvider(p);
+  }
 
   async function enviarCorreo() {
     setMarcando(true);
-    // Abre el cliente de correo del usuario (Outlook / Gmail / Apple Mail)
-    window.location.href = mailto;
+    const url = buildEmailUrl(siniestro, provider);
+    window.open(url, '_blank', 'noopener');
     // Marcamos como enviado de forma optimista (el usuario debe presionar enviar en su mail)
     await supabase.from('siniestros').update({ correo_enviado: true }).eq('id', siniestro.id);
     setMarcando(false);
@@ -420,14 +512,23 @@ function ConfirmacionCorreo({
 
       {/* Preview del correo */}
       <div className="rounded-xl border border-white/[0.08] bg-panel p-4 space-y-3">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">
-            ¿Enviar correo de notificación?
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">
+              ¿Enviar correo de notificación?
+            </div>
+            <p className="text-xs text-slate-500">
+              Se abre el cliente seleccionado en una pestaña nueva con los destinatarios y el contenido prellenado.
+            </p>
           </div>
-          <p className="text-xs text-slate-500">
-            Se abrirá tu cliente de correo (Outlook / Gmail) con los destinatarios y el contenido prellenado.
-            Solo necesitas presionar enviar.
-          </p>
+          <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1 shrink-0">
+            <ProviderPill active={provider === 'gmail'} onClick={() => cambiarProvider('gmail')}>
+              Gmail
+            </ProviderPill>
+            <ProviderPill active={provider === 'outlook'} onClick={() => cambiarProvider('outlook')}>
+              Outlook
+            </ProviderPill>
+          </div>
         </div>
 
         <div className="rounded-lg bg-card border border-white/[0.06] divide-y divide-white/[0.04] text-xs">
@@ -457,7 +558,7 @@ function ConfirmacionCorreo({
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
             </svg>
-            Abrir correo y enviar
+            Abrir {provider === 'gmail' ? 'Gmail' : 'Outlook'} y enviar
           </button>
           <button
             type="button"
@@ -524,5 +625,28 @@ function Field({
       {children}
       {hint && <p className="mt-1 text-[11px] text-slate-500">{hint}</p>}
     </div>
+  );
+}
+
+function ProviderPill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-md px-3 py-1 text-xs font-medium transition',
+        active ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'
+      )}
+    >
+      {children}
+    </button>
   );
 }

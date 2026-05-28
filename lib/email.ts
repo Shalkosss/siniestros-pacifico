@@ -85,6 +85,8 @@ export function buildCuerpo(s: Siniestro): string {
     .join('\n');
 }
 
+export type EmailProvider = 'gmail' | 'outlook';
+
 /**
  * Genera el href `mailto:` con destinatarios, asunto y cuerpo prellenados.
  * Abre el cliente de correo del usuario (Outlook / Gmail / Apple Mail).
@@ -98,4 +100,40 @@ export function buildMailtoUrl(s: Siniestro): string {
   const body = encodeURIComponent(buildCuerpo(s));
   const ccQ = cc.length > 0 ? `&cc=${cc.map(encodeURIComponent).join(',')}` : '';
   return `mailto:${to.map(encodeURIComponent).join(',')}?subject=${subject}${ccQ}&body=${body}`;
+}
+
+/**
+ * URL para abrir Gmail en el navegador (compose con campos prellenados).
+ * Funciona en cualquier navegador con sesión de Gmail abierta. Si no hay sesión,
+ * Google pide login y luego abre el compose.
+ */
+export function buildGmailUrl(s: Siniestro): string {
+  const { to, cc } = getDestinatarios(s);
+  const params = new URLSearchParams({
+    view: 'cm',
+    fs: '1',
+    to: to.join(','),
+    su: buildAsunto(s),
+    body: buildCuerpo(s),
+  });
+  if (cc.length > 0) params.set('cc', cc.join(','));
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
+/** URL para abrir Outlook Web (compose con campos prellenados). */
+export function buildOutlookUrl(s: Siniestro): string {
+  const { to, cc } = getDestinatarios(s);
+  const params = new URLSearchParams({
+    path: '/mail/action/compose',
+    to: to.join(','),
+    subject: buildAsunto(s),
+    body: buildCuerpo(s),
+  });
+  if (cc.length > 0) params.set('cc', cc.join(','));
+  return `https://outlook.office.com/mail/deeplink/compose?${params.toString()}`;
+}
+
+/** Devuelve la URL de correo según el proveedor elegido. */
+export function buildEmailUrl(s: Siniestro, provider: EmailProvider): string {
+  return provider === 'gmail' ? buildGmailUrl(s) : buildOutlookUrl(s);
 }
