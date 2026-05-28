@@ -188,8 +188,11 @@ export function SiniestroForm({ abogados }: Props) {
 
     if (autoEnviar) {
       // Dispara el cliente de correo y marca como enviado de inmediato.
-      await supabase.from('siniestros').update({ correo_enviado: true }).eq('id', siniestroFinal.id);
-      const url = buildEmailUrl(siniestroFinal, emailProvider);
+      await supabase.from('siniestros').update({
+        correo_enviado: true,
+        correo_enviado_fecha: new Date().toISOString(),
+      }).eq('id', siniestroFinal.id);
+      const url = buildEmailUrl(siniestroFinal, emailProvider, usuario ?? null);
       // Nueva pestaña para Gmail/Outlook web — mailto se ignora window.open, pero ya no usamos mailto.
       window.open(url, '_blank', 'noopener');
       router.push('/');

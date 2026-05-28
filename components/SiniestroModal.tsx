@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Siniestro, SiniestroMovimiento } from '@/lib/types';
+import type { Siniestro, SiniestroMovimiento, Usuario } from '@/lib/types';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
 import { Button } from './ui/Button';
@@ -16,6 +16,13 @@ import {
   puedeSubirPDF,
 } from '@/lib/permissions';
 import { esEtapaFinal } from '@/lib/workflows';
+import {
+  buildAsunto,
+  buildCuerpo,
+  buildEmailUrl,
+  getDestinatarios,
+  type EmailProvider,
+} from '@/lib/email';
 
 interface Props {
   siniestro: Siniestro;
@@ -26,21 +33,27 @@ interface Props {
 
 /** Tinte sutil del header por tipo — alineado al dark del kanban */
 const accentByTipo: Record<Siniestro['tipo'], string> = {
-  pago:      'from-cyan-500/15 via-cyan-500/10 to-transparent border-b border-cyan-500/20',
-  deducible: 'from-amber-500/15 via-amber-500/10 to-transparent border-b border-amber-500/20',
-  reembolso: 'from-violet-500/15 via-violet-500/10 to-transparent border-b border-violet-500/20',
+  pago:         'from-cyan-500/15 via-cyan-500/10 to-transparent border-b border-cyan-500/20',
+  deducible:    'from-amber-500/15 via-amber-500/10 to-transparent border-b border-amber-500/20',
+  valorizacion: 'from-emerald-500/15 via-emerald-500/10 to-transparent border-b border-emerald-500/20',
+  info_poliza:  'from-pink-500/15 via-pink-500/10 to-transparent border-b border-pink-500/20',
+  reembolso:    'from-violet-500/15 via-violet-500/10 to-transparent border-b border-violet-500/20',
 };
 
 const accentTextByTipo: Record<Siniestro['tipo'], string> = {
-  pago:      'text-cyan-300',
-  deducible: 'text-amber-300',
-  reembolso: 'text-violet-300',
+  pago:         'text-cyan-300',
+  deducible:    'text-amber-300',
+  valorizacion: 'text-emerald-300',
+  info_poliza:  'text-pink-300',
+  reembolso:    'text-violet-300',
 };
 
 const tipoLabel: Record<Siniestro['tipo'], string> = {
-  pago: 'Pago',
-  reembolso: 'Reembolso',
-  deducible: 'Deducible',
+  pago:         'Pago',
+  reembolso:    'Reembolso',
+  deducible:    'Deducible',
+  valorizacion: 'Valorización',
+  info_poliza:  'Info Póliza',
 };
 
 const dotByColor: Record<'verde' | 'amarillo' | 'rojo', string> = {
@@ -401,6 +414,9 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             )}
           </section>
 
+          {/* Enviar / Reenviar correo de notificación */}
+          <EnviarCorreoSection siniestro={siniestro} remitente={usuario ?? null} onChanged={onChanged} />
+
           {/* Historial */}
           {movimientos.length > 0 && (
             <section>
@@ -567,6 +583,181 @@ function DataLine({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+/* ---------------- Enviar / Reenviar correo desde el modal ---------------- */
+
+const EMAIL_PROVIDER_KEY = 'pacifico:email-provider';
+
+function EnviarCorreoSection({
+  siniestro,
+  remitente,
+  onChanged,
+}: {
+  siniestro: Siniestro;
+  remitente: Usuario | null;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [provider, setProvider] = useState<EmailProvider>('gmail');
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem(EMAIL_PROVIDER_KEY);
+    if (saved === 'gmail' || saved === 'outlook') setProvider(saved);
+  }, []);
+
+  function cambiarProvider(p: EmailProvider) {
+    setProvider(p);
+    if (typeof window !== 'undefined') localStorage.setItem(EMAIL_PROVIDER_KEY, p);
+  }
+
+  const dest = getDestinatarios(siniestro, remitente);
+  const asunto = buildAsunto(siniestro);
+  const cuerpo = buildCuerpo(siniestro);
+  const yaEnviado = siniestro.correo_enviado;
+  const fechaEnvio = siniestro.correo_enviado_fecha
+    ? formatFecha(siniestro.correo_enviado_fecha)
+    : null;
+
+  async function enviar() {
+    setEnviando(true);
+    const url = buildEmailUrl(siniestro, provider, remitente);
+    window.open(url, '_blank', 'noopener');
+    await supabase
+      .from('siniestros')
+      .update({
+        correo_enviado: true,
+        correo_enviado_fecha: new Date().toISOString(),
+      })
+      .eq('id', siniestro.id);
+    setEnviando(false);
+    onChanged();
+  }
+
+  return (
+    <section className="rounded-lg border border-white/[0.08] bg-white/[0.02]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+      >
+        <span className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+            <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+          </svg>
+          <span className="text-sm font-medium text-slate-200">
+            {yaEnviado ? 'Reenviar correo de notificación' : 'Enviar correo de notificación'}
+          </span>
+          {yaEnviado && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+              <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Enviado
+            </span>
+          )}
+        </span>
+        <svg
+          className={cn('h-3 w-3 text-slate-400 transition-transform', open && 'rotate-90')}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.06 10 7.23 6.29a.75.75 0 111.04-1.08l4.39 4.25a.75.75 0 010 1.08l-4.39 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="border-t border-white/[0.06] p-3 space-y-3 slide-in">
+          {yaEnviado && fechaEnvio && (
+            <div className="text-[11px] text-slate-500">
+              Último envío: <span className="text-slate-300">{fechaEnvio}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Cliente
+            </span>
+            <div className="inline-flex rounded-md bg-white/[0.04] border border-white/[0.06] p-0.5">
+              <button
+                onClick={() => cambiarProvider('gmail')}
+                className={cn(
+                  'rounded px-2 py-0.5 text-[11px] font-medium transition',
+                  provider === 'gmail' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+                )}
+              >
+                Gmail
+              </button>
+              <button
+                onClick={() => cambiarProvider('outlook')}
+                className={cn(
+                  'rounded px-2 py-0.5 text-[11px] font-medium transition',
+                  provider === 'outlook' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+                )}
+              >
+                Outlook
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-md bg-white/[0.02] border border-white/[0.05] divide-y divide-white/[0.04] text-xs">
+            <ModalRow label="Para">
+              <ModalChipList items={dest.to} />
+            </ModalRow>
+            <ModalRow label="CC">
+              <ModalChipList items={dest.cc} />
+            </ModalRow>
+            <ModalRow label="Asunto">
+              <span className="text-slate-200">{asunto}</span>
+            </ModalRow>
+            <ModalRow label="Cuerpo">
+              <pre className="whitespace-pre-wrap text-slate-300 text-[11px] font-sans leading-relaxed max-h-40 overflow-y-auto">
+                {cuerpo}
+              </pre>
+            </ModalRow>
+          </div>
+
+          <button
+            onClick={enviar}
+            disabled={enviando}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-500/50 bg-cyan-500/20 px-3 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/30 transition disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
+            </svg>
+            {enviando ? 'Abriendo…' : `Abrir ${provider === 'gmail' ? 'Gmail' : 'Outlook'} y enviar`}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ModalRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-2.5 py-1.5 grid grid-cols-[60px_1fr] gap-2 items-start">
+      <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-500 pt-0.5">{label}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function ModalChipList({ items }: { items: string[] }) {
+  if (items.length === 0) return <span className="text-slate-500">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((it) => (
+        <span
+          key={it}
+          className="inline-flex rounded-sm bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-slate-300"
+        >
+          {it}
+        </span>
+      ))}
     </div>
   );
 }

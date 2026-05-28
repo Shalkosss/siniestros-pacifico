@@ -104,7 +104,13 @@ export default function DashboardPage() {
             return acc + (d2 - d1) / (1000 * 60 * 60 * 24);
           }, 0) / cerrados.length;
 
-    const pendientesPorTipo: Record<TipoSiniestro, number> = { pago: 0, reembolso: 0, deducible: 0 };
+    const pendientesPorTipo: Record<TipoSiniestro, number> = {
+      pago: 0,
+      reembolso: 0,
+      deducible: 0,
+      valorizacion: 0,
+      info_poliza: 0,
+    };
     for (const s of pendientes) pendientesPorTipo[s.tipo]++;
 
     return { pendientes, cerrados, promedioCierre, pendientesPorTipo };
@@ -198,7 +204,7 @@ export default function DashboardPage() {
   // Pendientes por tipo (bar chart)
   const pendientesChart = useMemo(
     () =>
-      (['pago', 'reembolso', 'deducible'] as TipoSiniestro[]).map((t) => ({
+      (['pago', 'deducible', 'valorizacion', 'info_poliza', 'reembolso'] as TipoSiniestro[]).map((t) => ({
         label: TIPO_LABELS[t].plural,
         value: metrics.pendientesPorTipo[t],
       })),
@@ -287,7 +293,7 @@ export default function DashboardPage() {
             <MetricCard
               label="Pendientes"
               value={metrics.pendientes.length}
-              hint={`${metrics.pendientesPorTipo.pago} pagos · ${metrics.pendientesPorTipo.reembolso} reemb · ${metrics.pendientesPorTipo.deducible} deduc`}
+              hint={`${metrics.pendientesPorTipo.pago} pag · ${metrics.pendientesPorTipo.deducible} ded · ${metrics.pendientesPorTipo.valorizacion} val · ${metrics.pendientesPorTipo.info_poliza} ipo · ${metrics.pendientesPorTipo.reembolso} ree`}
               tone="primary"
               icon={
                 <svg className="h-7 w-7" viewBox="0 0 20 20" fill="currentColor">

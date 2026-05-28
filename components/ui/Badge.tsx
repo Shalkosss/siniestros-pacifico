@@ -2,12 +2,23 @@ import { cn } from '@/lib/utils';
 import type { TipoSiniestro } from '@/lib/types';
 import { ReactNode } from 'react';
 
-type Tone = 'pago' | 'reembolso' | 'deducible' | 'gray' | 'green' | 'yellow' | 'red';
+type Tone =
+  | 'pago'
+  | 'reembolso'
+  | 'deducible'
+  | 'valorizacion'
+  | 'info_poliza'
+  | 'gray'
+  | 'green'
+  | 'yellow'
+  | 'red';
 
 const toneStyles: Record<Tone, string> = {
   pago: 'bg-pacifico-light text-pacifico-primary border-pacifico-primary/20',
-  reembolso: 'bg-sky-50 text-sky-700 border-sky-200',
+  reembolso: 'bg-violet-50 text-violet-700 border-violet-200',
   deducible: 'bg-orange-50 text-orange-700 border-orange-200',
+  valorizacion: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  info_poliza: 'bg-pink-50 text-pink-700 border-pink-200',
   gray: 'bg-slate-100 text-slate-700 border-slate-200',
   green: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   yellow: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -34,7 +45,14 @@ export function Badge({ tone = 'gray', className, children }: BadgeProps) {
   );
 }
 
+const TIPO_LABEL: Record<TipoSiniestro, string> = {
+  pago: 'Pago',
+  reembolso: 'Reembolso',
+  deducible: 'Deducible',
+  valorizacion: 'Valorización',
+  info_poliza: 'Info Póliza',
+};
+
 export function TipoBadge({ tipo }: { tipo: TipoSiniestro }) {
-  const label = tipo === 'pago' ? 'Pago' : tipo === 'reembolso' ? 'Reembolso' : 'Deducible';
-  return <Badge tone={tipo}>{label}</Badge>;
+  return <Badge tone={tipo}>{TIPO_LABEL[tipo]}</Badge>;
 }

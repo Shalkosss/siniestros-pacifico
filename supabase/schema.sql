@@ -10,8 +10,12 @@ create extension if not exists "uuid-ossp";
 -- ENUMs
 -- =====================================================
 do $$ begin
-  create type tipo_siniestro as enum ('pago', 'reembolso', 'deducible');
+  create type tipo_siniestro as enum ('pago', 'reembolso', 'deducible', 'valorizacion', 'info_poliza');
 exception when duplicate_object then null; end $$;
+
+-- Migración suave: si la enum ya existía sin estos valores
+alter type tipo_siniestro add value if not exists 'valorizacion';
+alter type tipo_siniestro add value if not exists 'info_poliza';
 
 do $$ begin
   create type rol_usuario as enum ('admin', 'terceros', 'abogado', 'viewer');
@@ -25,14 +29,17 @@ create table if not exists public.usuarios (
   nombre      text unique not null,
   rol         rol_usuario not null,
   estudio     text,
+  email       text,
   activo      boolean not null default true,
   created_at  timestamptz not null default now()
 );
 
--- Migración: agrega `estudio` si la tabla ya existía sin esa columna
+-- Migración suave: agrega columnas si la tabla ya existía sin ellas
 alter table public.usuarios add column if not exists estudio text;
+alter table public.usuarios add column if not exists email text;
 
 create index if not exists idx_usuarios_activo on public.usuarios (activo);
+create index if not exists idx_usuarios_email on public.usuarios (email);
 
 -- =====================================================
 -- TABLA: siniestros
@@ -60,6 +67,7 @@ create table if not exists public.siniestros (
 -- Migración suave (idempotente) por si la tabla ya existía sin estas columnas
 alter table public.siniestros add column if not exists archived_at timestamptz;
 alter table public.siniestros add column if not exists correo_enviado boolean not null default false;
+alter table public.siniestros add column if not exists correo_enviado_fecha timestamptz;
 
 create index if not exists idx_siniestros_tipo on public.siniestros (tipo);
 create index if not exists idx_siniestros_estado on public.siniestros (estado);
