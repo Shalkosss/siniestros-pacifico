@@ -17,9 +17,11 @@ interface Props {
 
 /** Color del borde izquierdo según tipo */
 const borderByTipo: Record<Siniestro['tipo'], string> = {
-  pago:      'border-l-pago',
-  deducible: 'border-l-deducible',
-  reembolso: 'border-l-reembolso',
+  pago:         'border-l-[#06b6d4]',
+  deducible:    'border-l-[#f59e0b]',
+  valorizacion: 'border-l-[#10b981]',
+  info_poliza:  'border-l-[#ec4899]',
+  reembolso:    'border-l-[#8b5cf6]',
 };
 
 /** Estilos del day badge — discreto, font medium */

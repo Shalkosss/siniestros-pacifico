@@ -1,12 +1,16 @@
-import type { Siniestro } from './types';
+import type { Siniestro, Usuario } from './types';
 import { formatMoneda } from './utils';
 
 /**
  * Destinatarios del correo de notificación según el tipo y los dígitos del código.
  *
  * - DEDUCIBLES → Rodrigo (PARA), CCs internos + terceros vehiculares
- * - PAGOS / REEMBOLSOS de 10 díg (Jack) → Rodrigo + jasalcedo (PARA), CCs internos
- * - PAGOS / REEMBOLSOS de 8 díg (Christian) → Rodrigo + chcardenas (PARA), CCs internos
+ * - PAGOS / REEMBOLSOS / VALORIZACIONES / INFO PÓLIZA:
+ *     10 díg (Jack)      → Rodrigo + jasalcedo (PARA), CCs internos
+ *     8 díg  (Christian) → Rodrigo + chcardenas (PARA), CCs internos
+ *
+ * Además, si el remitente (abogado) pertenece a un estudio del directorio,
+ * se agregan sus compañeros al CC excluyéndolo a él/ella.
  */
 export interface Destinatarios {
   to: string[];
@@ -19,38 +23,137 @@ const CC_DEDUCIBLES_EXTRA = 'tercerosvehiculares@pacifico.com.pe';
 const JASALCEDO = 'jasalcedo@pacifico.com.pe';
 const CHCARDENAS = 'chcardenas@pacifico.com.pe';
 
-export function getDestinatarios(s: Pick<Siniestro, 'tipo' | 'codigo'>): Destinatarios {
-  if (s.tipo === 'deducible') {
-    return {
-      to: [RODRIGO],
-      cc: [...CC_BASE, CC_DEDUCIBLES_EXTRA],
-    };
+/**
+ * Directorio de estudios y sus miembros.
+ * Fuente de verdad para CC por estudio. Se compara contra el `email` del usuario
+ * logueado (o por nombre como fallback).
+ *
+ * Para agregar/quitar a alguien: edita aquí o pásalo a una tabla `estudios_emails`.
+ */
+export const ESTUDIOS_DIRECTORIO: Record<string, { nombre: string; miembros: string[] }> = {
+  abeo: {
+    nombre: 'Estudio Abeo',
+    miembros: [
+      'lmabeo@estudioabeo.com',
+      'jdavila@estudioabeo.com',
+      'gcastro@estudioabeo.com',
+      'obillus@estudioabeo.com',
+      'dsaravoa@estudioabeo.com',
+    ],
+  },
+  rvc: {
+    nombre: 'RVC Assist',
+    miembros: [
+      'mnizama@rvcassist.com',
+      'm.solis@rvcassist.com',
+      'pugaz@rvcassist.com',
+      'noelia.noriega@rvcassist.com',
+      'rvivar@rvcassist.com',
+    ],
+  },
+  jh: {
+    nombre: 'JH',
+    miembros: [
+      'ruthuahuacondori@yahoo.com',
+      'joelhuahuacondori@yahoo.com',
+      'constantino.venegas@yahoo.com',
+    ],
+  },
+  tuesta: {
+    nombre: 'Tuesta Legal',
+    miembros: ['jvillanueva@tuslegal.com.pe', 'ebanto@tuslegal.com.pe'],
+  },
+};
+
+/**
+ * Devuelve los emails de los compañeros de estudio del usuario, EXCLUYENDO al
+ * propio usuario. Si el usuario no pertenece a ningún estudio del directorio,
+ * o no tiene email, devuelve [].
+ */
+export function getCCEstudio(remitente: Usuario | null): string[] {
+  if (!remitente?.email) return [];
+  const myEmail = remitente.email.toLowerCase();
+  for (const estudio of Object.values(ESTUDIOS_DIRECTORIO)) {
+    const lower = estudio.miembros.map((m) => m.toLowerCase());
+    if (lower.includes(myEmail)) {
+      return estudio.miembros.filter((m) => m.toLowerCase() !== myEmail);
+    }
   }
-  // Pagos / Reembolsos: analista según dígitos
-  const esJack = s.codigo.length === 10;
-  const analista = esJack ? JASALCEDO : CHCARDENAS;
-  return {
-    to: [RODRIGO, analista],
-    cc: [...CC_BASE],
-  };
+  return [];
 }
 
-/** Asunto del correo */
+/**
+ * CC + TO finales tomando en cuenta el remitente (para el CC por estudio).
+ * - `remitente` es opcional: si no se pasa, no se agrega CC por estudio.
+ * - Deduplica emails (insensible a mayúsculas).
+ */
+export function getDestinatarios(
+  s: Pick<Siniestro, 'tipo' | 'codigo'>,
+  remitente?: Usuario | null
+): Destinatarios {
+  const cc: string[] = [...CC_BASE];
+  let to: string[];
+
+  if (s.tipo === 'deducible') {
+    to = [RODRIGO];
+    cc.push(CC_DEDUCIBLES_EXTRA);
+  } else {
+    // pago / reembolso / valorizacion / info_poliza
+    const esJack = s.codigo.length === 10;
+    const analista = esJack ? JASALCEDO : CHCARDENAS;
+    to = [RODRIGO, analista];
+  }
+
+  if (remitente) {
+    cc.push(...getCCEstudio(remitente));
+  }
+
+  return { to: dedupe(to), cc: dedupe(cc.filter((e) => !to.includes(e))) };
+}
+
+function dedupe(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of arr) {
+    const k = x.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(x);
+  }
+  return out;
+}
+
+/** Prefijo del asunto según tipo */
+const TIPO_PREFIJO: Record<Siniestro['tipo'], string> = {
+  pago: 'PAGO',
+  reembolso: 'REEMBOLSO',
+  deducible: 'DEDUCIBLE',
+  valorizacion: 'VALORIZACIÓN',
+  info_poliza: 'INFO PÓLIZA',
+};
+
+const TIPO_BODY_LABEL: Record<Siniestro['tipo'], string> = {
+  pago: 'Pago',
+  reembolso: 'Reembolso',
+  deducible: 'Deducible',
+  valorizacion: 'Valorización',
+  info_poliza: 'Información de Póliza',
+};
+
 export function buildAsunto(s: Pick<Siniestro, 'tipo' | 'codigo'>): string {
+  const prefix = TIPO_PREFIJO[s.tipo] ?? 'SINIESTRO';
   if (s.tipo === 'deducible') {
-    return `[DEDUCIBLE] Siniestro ${s.codigo} — Cobro al asegurado`;
+    return `[${prefix}] Siniestro ${s.codigo} — Cobro al asegurado`;
   }
-  if (s.tipo === 'pago') {
-    return `[PAGO] Siniestro ${s.codigo} — Solicitud de actividad`;
-  }
-  return `[REEMBOLSO] Siniestro ${s.codigo} — Solicitud de actividad`;
+  return `[${prefix}] Siniestro ${s.codigo} — Solicitud de actividad`;
 }
 
-/** Cuerpo del correo en texto plano */
 export function buildCuerpo(s: Siniestro): string {
+  const tipoLabel = TIPO_BODY_LABEL[s.tipo] ?? 'Siniestro';
+
   if (s.tipo === 'deducible') {
     return [
-      'Actividad de Deducible',
+      `Actividad de ${tipoLabel}`,
       '',
       `Código de siniestro: ${s.codigo}`,
       `Monto: ${formatMoneda(s.monto)}`,
@@ -66,7 +169,7 @@ export function buildCuerpo(s: Siniestro): string {
       .filter(Boolean)
       .join('\n');
   }
-  const tipoLabel = s.tipo === 'pago' ? 'Pago' : 'Reembolso';
+
   return [
     `Actividad de ${tipoLabel}`,
     '',
@@ -88,27 +191,19 @@ export function buildCuerpo(s: Siniestro): string {
 export type EmailProvider = 'gmail' | 'outlook';
 
 /**
- * Genera el href `mailto:` con destinatarios, asunto y cuerpo prellenados.
- * Abre el cliente de correo del usuario (Outlook / Gmail / Apple Mail).
- *
- * Nota: mailto no soporta adjuntos. Los PDFs se incluyen como URLs en el cuerpo;
- * el destinatario los puede abrir desde el correo.
+ * `mailto:` — fallback. No soporta adjuntos; los PDFs van como URLs en el cuerpo.
  */
-export function buildMailtoUrl(s: Siniestro): string {
-  const { to, cc } = getDestinatarios(s);
+export function buildMailtoUrl(s: Siniestro, remitente?: Usuario | null): string {
+  const { to, cc } = getDestinatarios(s, remitente);
   const subject = encodeURIComponent(buildAsunto(s));
   const body = encodeURIComponent(buildCuerpo(s));
   const ccQ = cc.length > 0 ? `&cc=${cc.map(encodeURIComponent).join(',')}` : '';
   return `mailto:${to.map(encodeURIComponent).join(',')}?subject=${subject}${ccQ}&body=${body}`;
 }
 
-/**
- * URL para abrir Gmail en el navegador (compose con campos prellenados).
- * Funciona en cualquier navegador con sesión de Gmail abierta. Si no hay sesión,
- * Google pide login y luego abre el compose.
- */
-export function buildGmailUrl(s: Siniestro): string {
-  const { to, cc } = getDestinatarios(s);
+/** Gmail web compose */
+export function buildGmailUrl(s: Siniestro, remitente?: Usuario | null): string {
+  const { to, cc } = getDestinatarios(s, remitente);
   const params = new URLSearchParams({
     view: 'cm',
     fs: '1',
@@ -120,9 +215,9 @@ export function buildGmailUrl(s: Siniestro): string {
   return `https://mail.google.com/mail/?${params.toString()}`;
 }
 
-/** URL para abrir Outlook Web (compose con campos prellenados). */
-export function buildOutlookUrl(s: Siniestro): string {
-  const { to, cc } = getDestinatarios(s);
+/** Outlook web compose */
+export function buildOutlookUrl(s: Siniestro, remitente?: Usuario | null): string {
+  const { to, cc } = getDestinatarios(s, remitente);
   const params = new URLSearchParams({
     path: '/mail/action/compose',
     to: to.join(','),
@@ -133,7 +228,10 @@ export function buildOutlookUrl(s: Siniestro): string {
   return `https://outlook.office.com/mail/deeplink/compose?${params.toString()}`;
 }
 
-/** Devuelve la URL de correo según el proveedor elegido. */
-export function buildEmailUrl(s: Siniestro, provider: EmailProvider): string {
-  return provider === 'gmail' ? buildGmailUrl(s) : buildOutlookUrl(s);
+export function buildEmailUrl(
+  s: Siniestro,
+  provider: EmailProvider,
+  remitente?: Usuario | null
+): string {
+  return provider === 'gmail' ? buildGmailUrl(s, remitente) : buildOutlookUrl(s, remitente);
 }

@@ -24,27 +24,35 @@ const TIPOS: {
   label: string;
   descripcion: string;
 }[] = [
-  { id: 'pago', label: 'Pago', descripcion: 'Al asegurado o tercero' },
-  { id: 'deducible', label: 'Deducible', descripcion: 'Cobro al asegurado' },
-  { id: 'reembolso', label: 'Reembolso', descripcion: 'Reembolso de gastos' },
+  { id: 'pago',         label: 'Pago',          descripcion: 'Al asegurado o tercero' },
+  { id: 'deducible',    label: 'Deducible',     descripcion: 'Cobro al asegurado' },
+  { id: 'valorizacion', label: 'Valorización',  descripcion: 'Valorización de daños' },
+  { id: 'info_poliza',  label: 'Info Póliza',   descripcion: 'Consulta de póliza' },
+  { id: 'reembolso',    label: 'Reembolso',     descripcion: 'Reembolso de gastos' },
 ];
 
 const tipoActiveStyle: Record<TipoSiniestro, string> = {
-  pago:      'bg-[rgba(6,182,212,0.15)]  border-[rgba(6,182,212,0.4)]  text-[#22d3ee]',
-  deducible: 'bg-[rgba(245,158,11,0.15)] border-[rgba(245,158,11,0.4)] text-[#fbbf24]',
-  reembolso: 'bg-[rgba(139,92,246,0.15)] border-[rgba(139,92,246,0.4)] text-[#a78bfa]',
+  pago:         'bg-[rgba(6,182,212,0.15)]  border-[rgba(6,182,212,0.4)]  text-[#22d3ee]',
+  deducible:    'bg-[rgba(245,158,11,0.15)] border-[rgba(245,158,11,0.4)] text-[#fbbf24]',
+  valorizacion: 'bg-[rgba(16,185,129,0.15)] border-[rgba(16,185,129,0.4)] text-[#34d399]',
+  info_poliza:  'bg-[rgba(236,72,153,0.15)] border-[rgba(236,72,153,0.4)] text-[#f472b6]',
+  reembolso:    'bg-[rgba(139,92,246,0.15)] border-[rgba(139,92,246,0.4)] text-[#a78bfa]',
 };
 
 const submitStyle: Record<TipoSiniestro, string> = {
-  pago:      'bg-[rgba(6,182,212,0.18)]  border-[rgba(6,182,212,0.5)]  text-[#22d3ee] hover:bg-[rgba(6,182,212,0.30)]',
-  deducible: 'bg-[rgba(245,158,11,0.18)] border-[rgba(245,158,11,0.5)] text-[#fbbf24] hover:bg-[rgba(245,158,11,0.30)]',
-  reembolso: 'bg-[rgba(139,92,246,0.18)] border-[rgba(139,92,246,0.5)] text-[#a78bfa] hover:bg-[rgba(139,92,246,0.30)]',
+  pago:         'bg-[rgba(6,182,212,0.18)]  border-[rgba(6,182,212,0.5)]  text-[#22d3ee] hover:bg-[rgba(6,182,212,0.30)]',
+  deducible:    'bg-[rgba(245,158,11,0.18)] border-[rgba(245,158,11,0.5)] text-[#fbbf24] hover:bg-[rgba(245,158,11,0.30)]',
+  valorizacion: 'bg-[rgba(16,185,129,0.18)] border-[rgba(16,185,129,0.5)] text-[#34d399] hover:bg-[rgba(16,185,129,0.30)]',
+  info_poliza:  'bg-[rgba(236,72,153,0.18)] border-[rgba(236,72,153,0.5)] text-[#f472b6] hover:bg-[rgba(236,72,153,0.30)]',
+  reembolso:    'bg-[rgba(139,92,246,0.18)] border-[rgba(139,92,246,0.5)] text-[#a78bfa] hover:bg-[rgba(139,92,246,0.30)]',
 };
 
 const inputFocusStyle: Record<TipoSiniestro, string> = {
-  pago:      'focus:border-[#06b6d4]',
-  deducible: 'focus:border-[#f59e0b]',
-  reembolso: 'focus:border-[#8b5cf6]',
+  pago:         'focus:border-[#06b6d4]',
+  deducible:    'focus:border-[#f59e0b]',
+  valorizacion: 'focus:border-[#10b981]',
+  info_poliza:  'focus:border-[#ec4899]',
+  reembolso:    'focus:border-[#8b5cf6]',
 };
 
 const baseInput =
@@ -198,6 +206,7 @@ export function SiniestroForm({ abogados }: Props) {
     return (
       <ConfirmacionCorreo
         siniestro={creado}
+        remitente={usuario ?? null}
         providerInicial={emailProvider}
         onCambioProvider={setEmailProvider}
         onCerrar={() => {
@@ -213,7 +222,7 @@ export function SiniestroForm({ abogados }: Props) {
       {/* Tipo de siniestro */}
       <div>
         <Label>Tipo de siniestro</Label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
           {TIPOS.map((t) => {
             const active = tipo === t.id;
             return (
@@ -466,18 +475,20 @@ export function SiniestroForm({ abogados }: Props) {
 
 function ConfirmacionCorreo({
   siniestro,
+  remitente,
   providerInicial,
   onCambioProvider,
   onCerrar,
 }: {
   siniestro: Siniestro;
+  remitente: Usuario | null;
   providerInicial: EmailProvider;
   onCambioProvider: (p: EmailProvider) => void;
   onCerrar: () => void;
 }) {
   const [marcando, setMarcando] = useState(false);
   const [provider, setProvider] = useState<EmailProvider>(providerInicial);
-  const dest = getDestinatarios(siniestro);
+  const dest = getDestinatarios(siniestro, remitente);
   const asunto = buildAsunto(siniestro);
   const cuerpo = buildCuerpo(siniestro);
 
@@ -488,10 +499,13 @@ function ConfirmacionCorreo({
 
   async function enviarCorreo() {
     setMarcando(true);
-    const url = buildEmailUrl(siniestro, provider);
+    const url = buildEmailUrl(siniestro, provider, remitente);
     window.open(url, '_blank', 'noopener');
     // Marcamos como enviado de forma optimista (el usuario debe presionar enviar en su mail)
-    await supabase.from('siniestros').update({ correo_enviado: true }).eq('id', siniestro.id);
+    await supabase.from('siniestros').update({
+      correo_enviado: true,
+      correo_enviado_fecha: new Date().toISOString(),
+    }).eq('id', siniestro.id);
     setMarcando(false);
   }
 

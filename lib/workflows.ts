@@ -5,38 +5,31 @@ export interface EtapaConfig {
   responsableFn: (siniestro: Pick<Siniestro, 'codigo'>) => string;
 }
 
+/** Workflow estándar de Pago (también usado por Valorización e Info Póliza por default) */
+const WORKFLOW_PAGO: EtapaConfig[] = [
+  { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
+  {
+    nombre: 'Actividad creada',
+    responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
+  },
+  {
+    nombre: 'En proceso de firmas',
+    responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
+  },
+  { nombre: 'En trama', responsableFn: () => 'Rodrigo' },
+  { nombre: 'Pagado', responsableFn: () => 'Rodrigo' },
+];
+
 /**
  * Define el flujo de columnas y el responsable de cada etapa por tipo de siniestro.
- * El "responsable" es quien debe mover la tarjeta hacia la SIGUIENTE etapa cuando
- * la tarjeta entra a esta columna.
+ * Valorización e Info Póliza usan por default el mismo workflow que Pago.
+ * Si Estef define columnas distintas, ajustar aquí.
  */
 export const WORKFLOWS: Record<TipoSiniestro, EtapaConfig[]> = {
-  pago: [
-    { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
-    {
-      nombre: 'Actividad creada',
-      responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
-    },
-    {
-      nombre: 'En proceso de firmas',
-      responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
-    },
-    { nombre: 'En trama', responsableFn: () => 'Rodrigo' },
-    { nombre: 'Pagado', responsableFn: () => 'Rodrigo' },
-  ],
-  reembolso: [
-    { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
-    {
-      nombre: 'Actividad creada',
-      responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
-    },
-    {
-      nombre: 'En proceso de firmas',
-      responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
-    },
-    { nombre: 'En trama', responsableFn: () => 'Rodrigo' },
-    { nombre: 'Pagado', responsableFn: () => 'Rodrigo' },
-  ],
+  pago: WORKFLOW_PAGO,
+  reembolso: WORKFLOW_PAGO,
+  valorizacion: WORKFLOW_PAGO,
+  info_poliza: WORKFLOW_PAGO,
   deducible: [
     { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
     { nombre: 'Actividad creada', responsableFn: () => 'Rosita' },
@@ -50,6 +43,8 @@ export const TIPO_LABELS: Record<TipoSiniestro, { singular: string; plural: stri
   pago: { singular: 'Pago', plural: 'Pagos' },
   reembolso: { singular: 'Reembolso', plural: 'Reembolsos' },
   deducible: { singular: 'Deducible', plural: 'Deducibles' },
+  valorizacion: { singular: 'Valorización', plural: 'Valorizaciones' },
+  info_poliza: { singular: 'Info Póliza', plural: 'Info Póliza' },
 };
 
 /** Etapas finales (siniestro cerrado) por tipo */
@@ -57,6 +52,8 @@ export const ETAPAS_FINALES: Record<TipoSiniestro, string> = {
   pago: 'Pagado',
   reembolso: 'Pagado',
   deducible: 'Cobrado',
+  valorizacion: 'Pagado',
+  info_poliza: 'Pagado',
 };
 
 export function getEtapas(tipo: TipoSiniestro): string[] {
@@ -80,7 +77,6 @@ export function getEtapaAnterior(tipo: TipoSiniestro, estado: string): string | 
   return WORKFLOWS[tipo][idx - 1].nombre;
 }
 
-/** Determina quién debe ser responsable cuando una tarjeta llega al `estado` indicado. */
 export function getResponsableDeEtapa(
   tipo: TipoSiniestro,
   estado: string,

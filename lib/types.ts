@@ -1,4 +1,4 @@
-export type TipoSiniestro = 'pago' | 'reembolso' | 'deducible';
+export type TipoSiniestro = 'pago' | 'reembolso' | 'deducible' | 'valorizacion' | 'info_poliza';
 export type RolUsuario = 'admin' | 'terceros' | 'abogado' | 'viewer';
 
 export interface Usuario {
@@ -6,6 +6,7 @@ export interface Usuario {
   nombre: string;
   rol: RolUsuario;
   estudio: string | null;
+  email: string | null;
   activo: boolean;
   created_at: string;
 }
@@ -27,6 +28,7 @@ export interface Siniestro {
   closed_at: string | null;
   archived_at: string | null;
   correo_enviado: boolean;
+  correo_enviado_fecha: string | null;
 }
 
 export interface SiniestroMovimiento {

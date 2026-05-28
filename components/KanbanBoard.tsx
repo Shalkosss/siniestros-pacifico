@@ -28,37 +28,44 @@ interface Props {
   modoHistorico?: boolean;
 }
 
-// Orden solicitado: Pagos → Deducibles → Reembolsos (Reembolsos al final por ser secundario)
-const TIPOS_ORDEN: TipoSiniestro[] = ['pago', 'deducible', 'reembolso'];
+// Orden final: Pagos → Deducibles → Valorizaciones → Info Póliza → Reembolsos (al final)
+const TIPOS_ORDEN: TipoSiniestro[] = ['pago', 'deducible', 'valorizacion', 'info_poliza', 'reembolso'];
 
 const TIPO_CHIPS: { id: TipoSiniestro | 'todos'; label: string; dot: string }[] = [
-  { id: 'todos', label: 'Todos', dot: 'bg-slate-500' },
-  { id: 'pago', label: 'Pagos', dot: 'bg-pago' },
-  { id: 'deducible', label: 'Deducibles', dot: 'bg-deducible' },
-  { id: 'reembolso', label: 'Reembolsos', dot: 'bg-reembolso' },
+  { id: 'todos',        label: 'Todos',          dot: 'bg-slate-500' },
+  { id: 'pago',         label: 'Pagos',          dot: 'bg-[#06b6d4]' },
+  { id: 'deducible',    label: 'Deducibles',     dot: 'bg-[#f59e0b]' },
+  { id: 'valorizacion', label: 'Valorizaciones', dot: 'bg-[#10b981]' },
+  { id: 'info_poliza',  label: 'Info Póliza',    dot: 'bg-[#ec4899]' },
+  { id: 'reembolso',    label: 'Reembolsos',     dot: 'bg-[#8b5cf6]' },
 ];
 
 /**
  * Tinte por sección — fondo sutil + borde con el color del tipo.
  * 0.05/0.15 para que se note sobre el gris neutro.
- * Pagos en cyan (no azul) para contrastar con el fondo dark.
  */
 const sectionStyleByTipo: Record<TipoSiniestro, string> = {
-  pago:      'bg-[rgba(6,182,212,0.05)]   border border-[rgba(6,182,212,0.15)]',
-  deducible: 'bg-[rgba(245,158,11,0.05)]  border border-[rgba(245,158,11,0.15)]',
-  reembolso: 'bg-[rgba(139,92,246,0.05)]  border border-[rgba(139,92,246,0.15)]',
+  pago:         'bg-[rgba(6,182,212,0.05)]   border border-[rgba(6,182,212,0.15)]',
+  deducible:    'bg-[rgba(245,158,11,0.05)]  border border-[rgba(245,158,11,0.15)]',
+  valorizacion: 'bg-[rgba(16,185,129,0.05)]  border border-[rgba(16,185,129,0.15)]',
+  info_poliza:  'bg-[rgba(236,72,153,0.05)]  border border-[rgba(236,72,153,0.15)]',
+  reembolso:    'bg-[rgba(139,92,246,0.05)]  border border-[rgba(139,92,246,0.15)]',
 };
 
 const sectionAccent: Record<TipoSiniestro, string> = {
-  pago:      'bg-pago',
-  deducible: 'bg-deducible',
-  reembolso: 'bg-reembolso',
+  pago:         'bg-[#06b6d4]',
+  deducible:    'bg-[#f59e0b]',
+  valorizacion: 'bg-[#10b981]',
+  info_poliza:  'bg-[#ec4899]',
+  reembolso:    'bg-[#8b5cf6]',
 };
 
 const sectionAccentText: Record<TipoSiniestro, string> = {
-  pago:      'text-pago',
-  deducible: 'text-deducible',
-  reembolso: 'text-reembolso',
+  pago:         'text-[#22d3ee]',
+  deducible:    'text-[#fbbf24]',
+  valorizacion: 'text-[#34d399]',
+  info_poliza:  'text-[#f472b6]',
+  reembolso:    'text-[#a78bfa]',
 };
 
 const MODE_STORAGE_KEY = 'pacifico:card-mode';
