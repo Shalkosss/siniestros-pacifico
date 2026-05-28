@@ -124,6 +124,31 @@ Modelo "Estef asigna, cada responsable mueve su parte" (opción 4 del brief):
 
 Lógica en `lib/permissions.ts`.
 
+## Envío de correos al crear siniestro
+
+Cuando un abogado crea un siniestro, después de guardarlo se le ofrece un paso de confirmación con preview del correo de notificación.
+
+**Destinatarios automáticos:**
+
+| Tipo | Para | CC |
+|------|------|-----|
+| **Deducible** | rodrigochallcop@pacifico.com.pe | mcisneros, maguerrero, tercerosvehiculares |
+| **Pago/Reembolso** (10 díg → Jack) | rodrigochallcop, **jasalcedo** | mcisneros, maguerrero |
+| **Pago/Reembolso** (8 díg → Christian) | rodrigochallcop, **chcardenas** | mcisneros, maguerrero |
+
+(Todos `@pacifico.com.pe` — definido en `lib/email.ts`.)
+
+**Implementación actual (default — cero setup):** `mailto:` link que abre el cliente de correo del usuario (Outlook / Gmail / Apple Mail) con todo prellenado. El abogado revisa y presiona enviar. Funciona desde Outlook móvil sin configuración adicional. Los PDFs van como URLs públicas en el cuerpo.
+
+**Upgrade opcional (Resend Edge Function):** [`supabase/functions/send-siniestro-email/index.ts`](supabase/functions/send-siniestro-email/index.ts) ya está listo. Para activarlo:
+1. Crea cuenta en https://resend.com (free 100 emails/día)
+2. Verifica el dominio `pacifico.com.pe` en Resend
+3. En Supabase → Edge Functions → Secrets: agrega `RESEND_API_KEY` + `RESEND_FROM`
+4. `supabase functions deploy send-siniestro-email`
+5. Reemplaza el `window.location.href = mailto` en `SiniestroForm.tsx` por un `fetch()` a la función
+
+**Tracking:** la columna `correo_enviado` se marca true cuando se dispara el envío. Las tarjetas muestran un ícono ✉ pequeño cuando ya fue notificado.
+
 ## Auth por equipo
 
 El sistema usa un password por equipo (no por persona). Cada equipo entra con su contraseña, y luego cada usuario elige su nombre del selector.

@@ -4,10 +4,11 @@ import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
-import type { TipoSiniestro, Usuario } from '@/lib/types';
+import type { Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
 import { cn, validarCodigo } from '@/lib/utils';
 import { getResponsableDeEtapa } from '@/lib/workflows';
 import { puedeCrearSiniestro } from '@/lib/permissions';
+import { buildAsunto, buildCuerpo, buildMailtoUrl, getDestinatarios } from '@/lib/email';
 
 const TIPOS: {
   id: TipoSiniestro;
@@ -19,21 +20,18 @@ const TIPOS: {
   { id: 'reembolso', label: 'Reembolso', descripcion: 'Reembolso de gastos' },
 ];
 
-/** Estilos del selector cuando está activo (tinte sutil del accent del tipo) */
 const tipoActiveStyle: Record<TipoSiniestro, string> = {
   pago:      'bg-[rgba(6,182,212,0.15)]  border-[rgba(6,182,212,0.4)]  text-[#22d3ee]',
   deducible: 'bg-[rgba(245,158,11,0.15)] border-[rgba(245,158,11,0.4)] text-[#fbbf24]',
   reembolso: 'bg-[rgba(139,92,246,0.15)] border-[rgba(139,92,246,0.4)] text-[#a78bfa]',
 };
 
-/** Estilos del botón "Crear" — ghost tintado por tipo */
 const submitStyle: Record<TipoSiniestro, string> = {
   pago:      'bg-[rgba(6,182,212,0.18)]  border-[rgba(6,182,212,0.5)]  text-[#22d3ee] hover:bg-[rgba(6,182,212,0.30)]',
   deducible: 'bg-[rgba(245,158,11,0.18)] border-[rgba(245,158,11,0.5)] text-[#fbbf24] hover:bg-[rgba(245,158,11,0.30)]',
   reembolso: 'bg-[rgba(139,92,246,0.18)] border-[rgba(139,92,246,0.5)] text-[#a78bfa] hover:bg-[rgba(139,92,246,0.30)]',
 };
 
-/** Color del focus border del input según tipo */
 const inputFocusStyle: Record<TipoSiniestro, string> = {
   pago:      'focus:border-[#06b6d4]',
   deducible: 'focus:border-[#f59e0b]',
@@ -62,6 +60,8 @@ export function SiniestroForm({ abogados }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Cuando se crea exitosamente, mostramos la confirmación con preview del correo */
+  const [creado, setCreado] = useState<Siniestro | null>(null);
 
   if (!puedeCrearSiniestro(usuario)) {
     return (
@@ -127,8 +127,8 @@ export function SiniestroForm({ abogados }: Props) {
       notas: 'Creación de siniestro',
     });
 
+    let pdfUrls: string[] = [];
     if (files.length > 0) {
-      const urls: string[] = [];
       for (const f of files) {
         const path = `${created.id}/${Date.now()}-${f.name.replace(/[^\w.\-]/g, '_')}`;
         const { error: upErr } = await supabase.storage.from(STORAGE_BUCKET).upload(path, f, {
@@ -136,10 +136,10 @@ export function SiniestroForm({ abogados }: Props) {
         });
         if (upErr) { console.error(upErr); continue; }
         const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-        urls.push(data.publicUrl);
+        pdfUrls.push(data.publicUrl);
       }
-      if (urls.length > 0) {
-        await supabase.from('siniestros').update({ pdf_urls: urls }).eq('id', created.id);
+      if (pdfUrls.length > 0) {
+        await supabase.from('siniestros').update({ pdf_urls: pdfUrls }).eq('id', created.id);
       }
     }
 
@@ -151,8 +151,21 @@ export function SiniestroForm({ abogados }: Props) {
       });
     }
 
-    router.push('/');
-    router.refresh();
+    setSubmitting(false);
+    setCreado({ ...(created as Siniestro), pdf_urls: pdfUrls });
+  }
+
+  // -------- Vista de confirmación post-creación --------
+  if (creado) {
+    return (
+      <ConfirmacionCorreo
+        siniestro={creado}
+        onCerrar={() => {
+          router.push('/');
+          router.refresh();
+        }}
+      />
+    );
   }
 
   return (
@@ -209,6 +222,7 @@ export function SiniestroForm({ abogados }: Props) {
             value={monto}
             onChange={(e) => setMonto(e.target.value)}
             placeholder="0.00"
+            inputMode="decimal"
             className={cn(baseInput, focusClass)}
           />
         </Field>
@@ -224,11 +238,14 @@ export function SiniestroForm({ abogados }: Props) {
       </Field>
 
       {tipo === 'deducible' ? (
-        <Field label="Correo del asegurado">
+        <Field label="Correo del asegurado" hint="A este correo se enviará el cobro del deducible.">
           <input
             type="email"
             value={correoAsegurado}
             onChange={(e) => setCorreoAsegurado(e.target.value)}
+            placeholder="correo@ejemplo.com"
+            inputMode="email"
+            autoComplete="email"
             className={cn(baseInput, focusClass)}
           />
         </Field>
@@ -239,6 +256,7 @@ export function SiniestroForm({ abogados }: Props) {
             value={dniTercero}
             onChange={(e) => setDniTercero(e.target.value)}
             maxLength={12}
+            inputMode="numeric"
             className={cn(baseInput, focusClass)}
           />
         </Field>
@@ -299,9 +317,7 @@ export function SiniestroForm({ abogados }: Props) {
       <div>
         <Label>PDFs adjuntos (opcional)</Label>
         <div className="flex items-center gap-3">
-          <label
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-card-hover hover:text-white transition"
-          >
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-card-hover hover:text-white transition">
             <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M4 4a2 2 0 012-2h6.586A2 2 0 0114 2.586L17.414 6A2 2 0 0118 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
             </svg>
@@ -323,10 +339,7 @@ export function SiniestroForm({ abogados }: Props) {
         {files.length > 0 && (
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {files.map((f) => (
-              <li
-                key={f.name}
-                className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-card px-2 py-1 text-[11px] text-slate-300"
-              >
+              <li key={f.name} className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-card px-2 py-1 text-[11px] text-slate-300">
                 <svg className="h-3 w-3 text-red-400" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4 4a2 2 0 012-2h6.586A2 2 0 0114 2.586L17.414 6A2 2 0 0118 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                 </svg>
@@ -363,6 +376,126 @@ export function SiniestroForm({ abogados }: Props) {
         </button>
       </div>
     </form>
+  );
+}
+
+/* ---------------- Vista de confirmación post-creación ---------------- */
+
+function ConfirmacionCorreo({
+  siniestro,
+  onCerrar,
+}: {
+  siniestro: Siniestro;
+  onCerrar: () => void;
+}) {
+  const [marcando, setMarcando] = useState(false);
+  const dest = getDestinatarios(siniestro);
+  const asunto = buildAsunto(siniestro);
+  const cuerpo = buildCuerpo(siniestro);
+  const mailto = buildMailtoUrl(siniestro);
+
+  async function enviarCorreo() {
+    setMarcando(true);
+    // Abre el cliente de correo del usuario (Outlook / Gmail / Apple Mail)
+    window.location.href = mailto;
+    // Marcamos como enviado de forma optimista (el usuario debe presionar enviar en su mail)
+    await supabase.from('siniestros').update({ correo_enviado: true }).eq('id', siniestro.id);
+    setMarcando(false);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Banner de éxito */}
+      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 flex items-start gap-3">
+        <svg className="h-5 w-5 shrink-0 text-emerald-400 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+        </svg>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-emerald-200">Siniestro creado</div>
+          <div className="text-xs text-emerald-300/80 mt-0.5">
+            Código <span className="font-mono">{siniestro.codigo}</span> · ya está en "Solicitud recibida".
+          </div>
+        </div>
+      </div>
+
+      {/* Preview del correo */}
+      <div className="rounded-xl border border-white/[0.08] bg-panel p-4 space-y-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">
+            ¿Enviar correo de notificación?
+          </div>
+          <p className="text-xs text-slate-500">
+            Se abrirá tu cliente de correo (Outlook / Gmail) con los destinatarios y el contenido prellenado.
+            Solo necesitas presionar enviar.
+          </p>
+        </div>
+
+        <div className="rounded-lg bg-card border border-white/[0.06] divide-y divide-white/[0.04] text-xs">
+          <Row label="Para">
+            <ChipList items={dest.to} />
+          </Row>
+          <Row label="CC">
+            <ChipList items={dest.cc} />
+          </Row>
+          <Row label="Asunto">
+            <span className="text-slate-200">{asunto}</span>
+          </Row>
+          <Row label="Cuerpo">
+            <pre className="whitespace-pre-wrap text-slate-300 text-[11px] font-sans leading-relaxed max-h-48 overflow-y-auto">
+              {cuerpo}
+            </pre>
+          </Row>
+        </div>
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            type="button"
+            onClick={enviarCorreo}
+            disabled={marcando}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/30 transition disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
+            </svg>
+            Abrir correo y enviar
+          </button>
+          <button
+            type="button"
+            onClick={onCerrar}
+            className="inline-flex items-center rounded-lg border border-white/[0.08] bg-transparent px-4 py-2 text-sm font-medium text-slate-400 hover:bg-white/[0.03] hover:text-slate-200 transition"
+          >
+            Omitir y volver al tablero
+          </button>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-slate-500">
+        Si presionas "Abrir correo y enviar", se marca el siniestro como notificado. Puedes
+        re-enviar el correo en cualquier momento desde el detalle del siniestro.
+      </p>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-3 py-2 grid grid-cols-[80px_1fr] gap-3 items-start">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 pt-0.5">{label}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function ChipList({ items }: { items: string[] }) {
+  if (items.length === 0) return <span className="text-slate-500">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((it) => (
+        <span key={it} className="inline-flex rounded-md bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 text-[11px] text-slate-300">
+          {it}
+        </span>
+      ))}
+    </div>
   );
 }
 

@@ -52,13 +52,23 @@ create table if not exists public.siniestros (
   asignado_a        text,
   created_at        timestamptz not null default now(),
   closed_at         timestamptz,
+  archived_at       timestamptz,
+  correo_enviado    boolean not null default false,
   constraint codigo_formato check (codigo ~ '^[0-9]{8}$' or codigo ~ '^[0-9]{10}$')
 );
+
+-- Migración suave (idempotente) por si la tabla ya existía sin estas columnas
+alter table public.siniestros add column if not exists archived_at timestamptz;
+alter table public.siniestros add column if not exists correo_enviado boolean not null default false;
 
 create index if not exists idx_siniestros_tipo on public.siniestros (tipo);
 create index if not exists idx_siniestros_estado on public.siniestros (estado);
 create index if not exists idx_siniestros_asignado on public.siniestros (asignado_a);
 create index if not exists idx_siniestros_created on public.siniestros (created_at desc);
+create index if not exists idx_siniestros_archived on public.siniestros (archived_at);
+create index if not exists idx_siniestros_activos
+  on public.siniestros (created_at desc)
+  where archived_at is null;
 
 -- =====================================================
 -- TABLA: siniestro_movimientos (log de cambios)

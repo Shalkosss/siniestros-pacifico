@@ -26,6 +26,7 @@ export interface Siniestro {
   created_at: string;
   closed_at: string | null;
   archived_at: string | null;
+  correo_enviado: boolean;
 }
 
 export interface SiniestroMovimiento {

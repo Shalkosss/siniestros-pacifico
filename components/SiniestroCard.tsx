@@ -61,11 +61,12 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           onClick={onClick}
           {...dragProps}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-          title={`${siniestro.codigo} · ${siniestro.asegurado_nombre ?? ''} · ${diasAbierto}d abierto`}
+          title={`${siniestro.codigo} · ${siniestro.asegurado_nombre ?? ''} · ${diasAbierto}d abierto${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
         >
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1">
             {siniestro.codigo}
           </span>
+          {siniestro.correo_enviado && <MailDot />}
           <DayBadge dias={diasAbierto} urgencia={urgencia} />
         </button>
       </div>
@@ -85,8 +86,9 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
     >
       <button onClick={onClick} {...dragProps} className="block w-full text-left p-3">
         <div className="flex items-start justify-between gap-2">
-          <span className="font-mono text-sm font-semibold tracking-tight text-slate-100">
+          <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex items-center gap-1.5">
             {siniestro.codigo}
+            {siniestro.correo_enviado && <MailDot />}
           </span>
           <DayBadge dias={diasAbierto} urgencia={urgencia} />
         </div>
@@ -121,6 +123,21 @@ function DayBadge({ dias, urgencia }: { dias: number; urgencia: NivelUrgencia })
     >
       <span className="font-semibold">{dias}</span>
       <span className="opacity-70">d</span>
+    </span>
+  );
+}
+
+/** Indicador discreto: el correo de notificación ya fue enviado */
+function MailDot() {
+  return (
+    <span
+      className="inline-grid h-4 w-4 place-items-center rounded-sm text-emerald-400/80"
+      title="Correo de notificación enviado"
+    >
+      <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+        <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+      </svg>
     </span>
   );
 }
