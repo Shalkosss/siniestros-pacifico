@@ -4,7 +4,88 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ---
 
-## v4 — Mobile + correos + archivar (actual)
+## v6 — Seguridad IT + Cheques + Moneda + Vistas por usuario (actual)
+
+**Migración requerida:** `supabase/migration_v6.sql`
+
+### Nuevo
+- **Aviso de novedades + botón "Actualizaciones"** ([`UpdatesAnnouncement.tsx`](components/UpdatesAnnouncement.tsx), [`lib/updates.ts`](lib/updates.ts)):
+  - Banner que aparece una sola vez tras cada release (se guarda en `localStorage`)
+  - Botón "Actualizaciones" en el header abre el historial completo de cambios
+- **Censura de datos personales para abogados externos** (objeción de IT):
+  - Nombres y DNI de terceros/asegurados aparecen enmascarados (`J••• P•••`, `••••1234`) en tarjetas y modal para el rol `abogado`
+  - La preview del correo se oculta al abogado; el correo real a Pacífico va completo
+  - Helpers `censurar` / `debeCensurar`
+- **Moneda Soles/Dólares** ([`lib/utils.ts`](lib/utils.ts)):
+  - Toggle clicable PEN/USD en el formulario y editable en el modal
+  - `formatMoneda(monto, moneda)` respeta la moneda en tarjetas, modal y correo
+- **Cheques** (sub-opción dentro de Pago):
+  - Checkbox "Es cheque" que pide banco, persona a recoger, su DNI e indicación de si el deducible fue pagado (Sí/No/Sin indicar)
+  - Visible y editable en el modal; incluido en el cuerpo del correo
+- **Correos @yahoo.com**: nuevo proveedor Yahoo junto a Gmail/Outlook en los 3 selectores
+- **Vistas por integrante de Pacífico** ([`lib/vistas.ts`](lib/vistas.ts)):
+  - Jack → pagos/reembolsos de 10 dígitos · Christian → 8 dígitos · Rosita → deducibles
+  - Arrancan en "Mi vista"; botón para alternar a "Todo Pacífico"
+- **Conteo de días hábiles**: el conteo excluye sábados y domingos; Pacífico puede fijar el N° de días base de un siniestro o restablecerlo
+
+### Cambios
+- **Movimiento de cartas en ambos sentidos**: todo el equipo de Pacífico (admin y terceros) puede avanzar y **retroceder** cualquier siniestro entre etapas ([`lib/permissions.ts`](lib/permissions.ts))
+- **Acceso al tablero para viewers**: Marcos y María Elena ahora ven el Tablero (solo lectura, sin arrastrar)
+
+### Bugfix
+- **Valorización / Info Póliza**: ahora solo requieren el número de siniestro para registrarse (ya no piden monto, nombre ni DNI)
+
+### Schema
+```sql
+alter table siniestros add column if not exists moneda text not null default 'PEN';
+alter table siniestros add column if not exists es_cheque boolean not null default false;
+alter table siniestros add column if not exists cheque_banco text;
+alter table siniestros add column if not exists cheque_persona text;
+alter table siniestros add column if not exists cheque_dni text;
+alter table siniestros add column if not exists cheque_deducible_pagado boolean;
+alter table siniestros add column if not exists dias_ajuste integer;
+alter table siniestros add column if not exists dias_ajuste_fecha timestamptz;
+```
+
+---
+
+## v5 — Valorización + Info Póliza + CC por estudio + reenviar
+
+**Migración requerida:** `supabase/migration_v5.sql`
+
+### Nuevo
+- **Dos tipos de siniestro nuevos**:
+  - **Valorización** (verde esmeralda `#10b981`)
+  - **Info Póliza** (rosa `#ec4899`)
+  - Usan por default el mismo workflow que Pagos (Estef puede ajustar en `lib/workflows.ts`)
+  - Orden en el tablero: Pagos → Deducibles → Valorizaciones → Info Póliza → Reembolsos
+- **CC por estudio** ([`lib/email.ts`](lib/email.ts)):
+  - Cuando un abogado envía correo, el sistema agrega automáticamente al CC a sus compañeros de estudio (excluyéndolo)
+  - Directorio hardcodeado para RVC Assist, Estudio Abeo, JH, Tuesta Legal
+- **Reenviar correo desde el modal** ([`SiniestroModal.tsx`](components/SiniestroModal.tsx)):
+  - Nueva sección colapsable "Enviar/Reenviar correo de notificación"
+  - Preview de Para/CC/Asunto/Cuerpo
+  - Toggle Gmail/Outlook
+  - Si ya fue enviado: muestra badge "Enviado" + fecha del último envío
+- **Tracking de fecha**: nueva columna `correo_enviado_fecha` (`timestamptz`) para registrar cuándo se envió por última vez
+- **Directorio de abogados sincronizado** con datos reales:
+  - RVC: Nizama, Solís, Ugaz, Noelia Noriega, Vivar
+  - Abeo: Mabeo, Dávila, Castro, Billus, Saravoa
+  - JH: Ruth, Joel Huahuacondori, Constantino Venegas
+  - Tuesta: Villanueva, Banto
+  - Los abogados placeholder anteriores quedan inactivos (preservan historial)
+
+### Schema
+```sql
+alter type tipo_siniestro add value if not exists 'valorizacion';
+alter type tipo_siniestro add value if not exists 'info_poliza';
+alter table usuarios add column if not exists email text;
+alter table siniestros add column if not exists correo_enviado_fecha timestamptz;
+```
+
+---
+
+## v4 — Mobile + correos + archivar
 
 **Migración requerida:** `supabase/migration_v4.sql`
 

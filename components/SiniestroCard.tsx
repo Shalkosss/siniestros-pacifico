@@ -1,10 +1,12 @@
 'use client';
 
 import type { Siniestro } from '@/lib/types';
-import { cn, colorPorDias, diasDesde, formatMoneda, type NivelUrgencia } from '@/lib/utils';
+import { cn, censurar, colorPorDias, diasEfectivos, formatMoneda, type NivelUrgencia } from '@/lib/utils';
 import { useMemo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { useUser } from './UserContext';
+import { debeCensurar } from '@/lib/permissions';
 
 export type CardMode = 'compacto' | 'detallado';
 
@@ -32,8 +34,11 @@ const badgeByUrgencia: Record<NivelUrgencia, string> = {
 };
 
 export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
-  const diasAbierto = useMemo(() => diasDesde(siniestro.created_at), [siniestro.created_at]);
+  const { usuario } = useUser();
+  const censura = debeCensurar(usuario);
+  const diasAbierto = useMemo(() => diasEfectivos(siniestro), [siniestro]);
   const urgencia = useMemo(() => colorPorDias(diasAbierto), [diasAbierto]);
+  const nombreMostrado = censurar(siniestro.asegurado_nombre, censura);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: siniestro.id,
@@ -63,7 +68,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           onClick={onClick}
           {...dragProps}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-          title={`${siniestro.codigo} · ${siniestro.asegurado_nombre ?? ''} · ${diasAbierto}d abierto${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
+          title={`${siniestro.codigo} · ${nombreMostrado} · ${diasAbierto}d abierto${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
         >
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1">
             {siniestro.codigo}
@@ -97,10 +102,10 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
 
         <div className="mt-1.5 space-y-0.5">
           {siniestro.asegurado_nombre && (
-            <div className="text-[13px] text-slate-300 truncate">{siniestro.asegurado_nombre}</div>
+            <div className="text-[13px] text-slate-300 truncate">{nombreMostrado}</div>
           )}
           {siniestro.monto != null && (
-            <div className="text-[13px] font-semibold text-slate-100">{formatMoneda(siniestro.monto)}</div>
+            <div className="text-[13px] font-semibold text-slate-100">{formatMoneda(siniestro.monto, siniestro.moneda)}</div>
           )}
         </div>
 

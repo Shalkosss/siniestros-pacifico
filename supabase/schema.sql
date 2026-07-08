@@ -68,6 +68,15 @@ create table if not exists public.siniestros (
 alter table public.siniestros add column if not exists archived_at timestamptz;
 alter table public.siniestros add column if not exists correo_enviado boolean not null default false;
 alter table public.siniestros add column if not exists correo_enviado_fecha timestamptz;
+-- v6: moneda, cheques y ajuste de días (ver supabase/migration_v6.sql)
+alter table public.siniestros add column if not exists moneda text not null default 'PEN';
+alter table public.siniestros add column if not exists es_cheque boolean not null default false;
+alter table public.siniestros add column if not exists cheque_banco text;
+alter table public.siniestros add column if not exists cheque_persona text;
+alter table public.siniestros add column if not exists cheque_dni text;
+alter table public.siniestros add column if not exists cheque_deducible_pagado boolean;
+alter table public.siniestros add column if not exists dias_ajuste integer;
+alter table public.siniestros add column if not exists dias_ajuste_fecha timestamptz;
 
 create index if not exists idx_siniestros_tipo on public.siniestros (tipo);
 create index if not exists idx_siniestros_estado on public.siniestros (estado);

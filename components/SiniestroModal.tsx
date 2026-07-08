@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Siniestro, SiniestroMovimiento, Usuario } from '@/lib/types';
+import type { Moneda, Siniestro, SiniestroMovimiento, Usuario } from '@/lib/types';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
 import { Button } from './ui/Button';
 import { Textarea, Input } from './ui/Input';
-import { cn, colorPorDias, diasDesde, formatFecha, formatMoneda } from '@/lib/utils';
+import { cn, censurar, colorPorDias, diasDesde, diasEfectivos, diasHabilesDesde, formatFecha, formatMoneda } from '@/lib/utils';
 import {
+  debeCensurar,
   puedeArchivar,
   puedeBorrarPDF,
   puedeBorrarSiniestro,
@@ -74,6 +75,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const [editMode, setEditMode] = useState(false);
   const [notas, setNotas] = useState(siniestro.notas ?? '');
   const [monto, setMonto] = useState<string>(siniestro.monto?.toString() ?? '');
+  const [moneda, setMoneda] = useState<Moneda>(siniestro.moneda ?? 'PEN');
   const [aseguradoNombre, setAseguradoNombre] = useState(siniestro.asegurado_nombre ?? '');
   const [dniTercero, setDniTercero] = useState(siniestro.dni_tercero ?? '');
   const [correoAsegurado, setCorreoAsegurado] = useState(siniestro.correo_asegurado ?? '');
@@ -87,6 +89,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   useEffect(() => {
     setNotas(siniestro.notas ?? '');
     setMonto(siniestro.monto?.toString() ?? '');
+    setMoneda(siniestro.moneda ?? 'PEN');
     setAseguradoNombre(siniestro.asegurado_nombre ?? '');
     setDniTercero(siniestro.dni_tercero ?? '');
     setCorreoAsegurado(siniestro.correo_asegurado ?? '');
@@ -105,6 +108,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   }, [onClose]);
 
   const canEdit = puedeEditarCampos(usuario, siniestro);
+  const censura = debeCensurar(usuario);
   const canUpload = puedeSubirPDF(usuario, siniestro);
   const canDelete = puedeBorrarPDF(usuario, siniestro);
   const canDeleteSiniestro = puedeBorrarSiniestro(usuario);
@@ -113,10 +117,10 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const isArchivado = !!siniestro.archived_at;
   const puedeMoverEnGeneral = usuario?.rol === 'admin' || usuario?.rol === 'terceros';
 
-  const diasAbierto = diasDesde(siniestro.created_at);
+  const diasAbierto = diasEfectivos(siniestro);
   const diasEnEtapaActual = (() => {
     const ult = [...movimientos].reverse().find((m) => m.estado_nuevo === siniestro.estado);
-    return diasDesde(ult?.timestamp ?? siniestro.created_at);
+    return diasHabilesDesde(ult?.timestamp ?? siniestro.created_at);
   })();
   const colorEtapa = colorPorDias(diasEnEtapaActual);
 
@@ -126,6 +130,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     const updates: Partial<Siniestro> = {
       notas: notas || null,
       monto: monto ? Number(monto) : null,
+      moneda,
       asegurado_nombre: aseguradoNombre || null,
     };
     if (siniestro.tipo !== 'deducible') updates.dni_tercero = dniTercero || null;
@@ -187,6 +192,36 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     onClose();
     onChanged();
     if (window.location.pathname.startsWith('/siniestro/')) router.push('/');
+  }
+
+  async function actualizarDeduciblePagado(valor: boolean) {
+    if (!puedeMoverEnGeneral) return;
+    const nuevo = siniestro.cheque_deducible_pagado === valor ? null : valor;
+    const { error } = await supabase
+      .from('siniestros')
+      .update({ cheque_deducible_pagado: nuevo })
+      .eq('id', siniestro.id);
+    if (error) { alert('Error: ' + error.message); return; }
+    onChanged();
+  }
+
+  const [diasInput, setDiasInput] = useState('');
+  async function ajustarDias(reset: boolean) {
+    if (!puedeMoverEnGeneral) return;
+    const payload = reset
+      ? { dias_ajuste: null, dias_ajuste_fecha: null }
+      : { dias_ajuste: Math.max(0, Math.floor(Number(diasInput) || 0)), dias_ajuste_fecha: new Date().toISOString() };
+    const { error } = await supabase.from('siniestros').update(payload).eq('id', siniestro.id);
+    if (error) { alert('Error: ' + error.message); return; }
+    await supabase.from('siniestro_movimientos').insert({
+      siniestro_id: siniestro.id,
+      estado_anterior: siniestro.estado,
+      estado_nuevo: siniestro.estado,
+      movido_por: usuario?.nombre ?? 'sistema',
+      notas: reset ? 'Conteo de días restablecido' : `Días ajustados a ${payload.dias_ajuste}`,
+    });
+    setDiasInput('');
+    onChanged();
   }
 
   async function archivar() {
@@ -324,30 +359,80 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                     value={monto}
                     onChange={(e) => setMonto(e.target.value)}
                   />
-                  <Input
-                    label="Asegurado / tercero"
-                    value={aseguradoNombre}
-                    onChange={(e) => setAseguradoNombre(e.target.value)}
-                  />
-                  {siniestro.tipo !== 'deducible' ? (
-                    <Input label="DNI" value={dniTercero} onChange={(e) => setDniTercero(e.target.value)} />
-                  ) : (
-                    <Input label="Correo" type="email" value={correoAsegurado} onChange={(e) => setCorreoAsegurado(e.target.value)} />
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1.5">Moneda</label>
+                    <div className="inline-flex rounded-lg bg-white/[0.04] border border-white/[0.06] p-1">
+                      <MonedaPill active={moneda === 'PEN'} onClick={() => setMoneda('PEN')}>S/ Soles</MonedaPill>
+                      <MonedaPill active={moneda === 'USD'} onClick={() => setMoneda('USD')}>$ Dólares</MonedaPill>
+                    </div>
+                  </div>
+                  {!censura && (
+                    <>
+                      <Input
+                        label="Asegurado / tercero"
+                        value={aseguradoNombre}
+                        onChange={(e) => setAseguradoNombre(e.target.value)}
+                      />
+                      {siniestro.tipo !== 'deducible' ? (
+                        <Input label="DNI" value={dniTercero} onChange={(e) => setDniTercero(e.target.value)} />
+                      ) : (
+                        <Input label="Correo" type="email" value={correoAsegurado} onChange={(e) => setCorreoAsegurado(e.target.value)} />
+                      )}
+                    </>
                   )}
                 </div>
                 <Textarea label="Notas" value={notas} onChange={(e) => setNotas(e.target.value)} rows={3} />
               </div>
             ) : (
               <div className="rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5">
-                <DataLine label="Monto" value={formatMoneda(siniestro.monto)} highlight />
-                <DataLine label="Asegurado / tercero" value={siniestro.asegurado_nombre ?? '—'} />
+                <DataLine label="Monto" value={formatMoneda(siniestro.monto, siniestro.moneda)} highlight />
+                <DataLine label="Asegurado / tercero" value={censurar(siniestro.asegurado_nombre, censura)} />
                 {siniestro.tipo !== 'deducible' ? (
-                  <DataLine label="DNI" value={siniestro.dni_tercero ?? '—'} />
+                  <DataLine label="DNI" value={censurar(siniestro.dni_tercero, censura)} />
                 ) : (
                   <DataLine label="Correo" value={siniestro.correo_asegurado ?? '—'} />
                 )}
                 <DataLine label="Solicitante" value={siniestro.solicitante} />
                 {siniestro.notas && <DataLine label="Notas" value={siniestro.notas} multiline />}
+              </div>
+            )}
+
+            {/* Bloque Cheque */}
+            {siniestro.es_cheque && !editMode && (
+              <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] divide-y divide-white/5">
+                <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-300">
+                  Cheque
+                </div>
+                <DataLine label="Banco" value={siniestro.cheque_banco ?? '—'} />
+                <DataLine label="Recoge" value={censurar(siniestro.cheque_persona, censura)} />
+                <DataLine label="DNI recoge" value={censurar(siniestro.cheque_dni, censura)} />
+                <DataLine
+                  label="Deducible"
+                  value={
+                    siniestro.cheque_deducible_pagado == null
+                      ? 'Sin indicar'
+                      : siniestro.cheque_deducible_pagado
+                      ? 'Pagado'
+                      : 'No pagado'
+                  }
+                />
+                {puedeMoverEnGeneral && (
+                  <div className="px-3 py-2 flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500">Marcar deducible:</span>
+                    <button
+                      onClick={() => actualizarDeduciblePagado(true)}
+                      className={cn('rounded px-2 py-0.5 text-[11px] border transition', siniestro.cheque_deducible_pagado === true ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300' : 'border-white/10 text-slate-400 hover:text-white')}
+                    >
+                      Pagado
+                    </button>
+                    <button
+                      onClick={() => actualizarDeduciblePagado(false)}
+                      className={cn('rounded px-2 py-0.5 text-[11px] border transition', siniestro.cheque_deducible_pagado === false ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-white/10 text-slate-400 hover:text-white')}
+                    >
+                      No pagado
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -473,6 +558,39 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             </section>
           )}
 
+          {/* Ajuste de días (pacífico: admin/terceros) */}
+          {puedeMoverEnGeneral && (
+            <section className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Ajustar días</h3>
+              <p className="text-[11px] text-slate-500">
+                Fija cuántos días hábiles lleva este siniestro. El conteo seguirá sumando días hábiles desde hoy.
+                {siniestro.dias_ajuste != null && (
+                  <span className="block mt-0.5 text-slate-400">
+                    Base actual: {siniestro.dias_ajuste}d desde {siniestro.dias_ajuste_fecha ? formatFecha(siniestro.dias_ajuste_fecha) : '—'}.
+                  </span>
+                )}
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  value={diasInput}
+                  onChange={(e) => setDiasInput(e.target.value)}
+                  placeholder="N° días"
+                  className="w-24 rounded-lg bg-white/[0.03] border border-white/[0.06] px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-white/20"
+                />
+                <Button size="sm" onClick={() => ajustarDias(false)} disabled={diasInput === ''}>
+                  Fijar días
+                </Button>
+                {siniestro.dias_ajuste != null && (
+                  <Button variant="outline" size="sm" onClick={() => ajustarDias(true)}>
+                    Restablecer
+                  </Button>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Acciones de archivo (pacífico: admin/terceros) */}
           {canArchive && (
             <section className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
@@ -590,6 +708,11 @@ function DataLine({
 /* ---------------- Enviar / Reenviar correo desde el modal ---------------- */
 
 const EMAIL_PROVIDER_KEY = 'pacifico:email-provider';
+const PROVIDER_LABEL_MODAL: Record<EmailProvider, string> = {
+  gmail: 'Gmail',
+  outlook: 'Outlook',
+  yahoo: 'Yahoo',
+};
 
 function EnviarCorreoSection({
   siniestro,
@@ -607,7 +730,7 @@ function EnviarCorreoSection({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = localStorage.getItem(EMAIL_PROVIDER_KEY);
-    if (saved === 'gmail' || saved === 'outlook') setProvider(saved);
+    if (saved === 'gmail' || saved === 'outlook' || saved === 'yahoo') setProvider(saved);
   }, []);
 
   function cambiarProvider(p: EmailProvider) {
@@ -615,8 +738,11 @@ function EnviarCorreoSection({
     if (typeof window !== 'undefined') localStorage.setItem(EMAIL_PROVIDER_KEY, p);
   }
 
+  const censura = debeCensurar(remitente);
   const dest = getDestinatarios(siniestro, remitente);
   const asunto = buildAsunto(siniestro);
+  // El correo real (para Pacífico) va sin censura; la vista previa que ve un
+  // abogado externo se oculta por seguridad.
   const cuerpo = buildCuerpo(siniestro);
   const yaEnviado = siniestro.correo_enviado;
   const fechaEnvio = siniestro.correo_enviado_fecha
@@ -701,6 +827,15 @@ function EnviarCorreoSection({
               >
                 Outlook
               </button>
+              <button
+                onClick={() => cambiarProvider('yahoo')}
+                className={cn(
+                  'rounded px-2 py-0.5 text-[11px] font-medium transition',
+                  provider === 'yahoo' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+                )}
+              >
+                Yahoo
+              </button>
             </div>
           </div>
 
@@ -715,9 +850,15 @@ function EnviarCorreoSection({
               <span className="text-slate-200">{asunto}</span>
             </ModalRow>
             <ModalRow label="Cuerpo">
+              {censura ? (
+                <span className="text-[11px] text-slate-500 italic">
+                  Contenido oculto por seguridad. El correo se enviará completo a Pacífico.
+                </span>
+              ) : (
               <pre className="whitespace-pre-wrap text-slate-300 text-[11px] font-sans leading-relaxed max-h-40 overflow-y-auto">
                 {cuerpo}
               </pre>
+              )}
             </ModalRow>
           </div>
 
@@ -729,11 +870,26 @@ function EnviarCorreoSection({
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
             </svg>
-            {enviando ? 'Abriendo…' : `Abrir ${provider === 'gmail' ? 'Gmail' : 'Outlook'} y enviar`}
+            {enviando ? 'Abriendo…' : `Abrir ${PROVIDER_LABEL_MODAL[provider]} y enviar`}
           </button>
         </div>
       )}
     </section>
+  );
+}
+
+function MonedaPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded px-2 py-0.5 text-[11px] font-medium transition',
+        active ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

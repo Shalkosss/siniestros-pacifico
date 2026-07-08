@@ -1,5 +1,5 @@
 import type { Siniestro, Usuario } from './types';
-import { getResponsableDeEtapa, getSiguienteEtapa } from './workflows';
+import { getSiguienteEtapa } from './workflows';
 
 /**
  * Modelo de permisos (Opción 4 del brief):
@@ -12,6 +12,15 @@ import { getResponsableDeEtapa, getSiguienteEtapa } from './workflows';
 export function puedeCrearSiniestro(usuario: Usuario | null): boolean {
   if (!usuario) return false;
   return usuario.rol === 'admin' || usuario.rol === 'abogado';
+}
+
+/**
+ * ¿Se deben censurar los datos personales (nombres/DNI de terceros y asegurados)
+ * para este usuario? Por objeción de IT, los abogados externos no deben ver esos
+ * datos una vez el siniestro está en el tablero.
+ */
+export function debeCensurar(usuario: Usuario | null): boolean {
+  return usuario?.rol === 'abogado';
 }
 
 export function puedeEditarCampos(usuario: Usuario | null, siniestro: Siniestro): boolean {
@@ -51,12 +60,9 @@ export function puedeArchivar(usuario: Usuario | null): boolean {
  */
 export function puedeMover(usuario: Usuario | null, siniestro: Siniestro): boolean {
   if (!usuario) return false;
-  if (usuario.rol === 'admin') return true;
-  if (usuario.rol === 'viewer' || usuario.rol === 'abogado') return false;
-  if (usuario.rol === 'terceros') {
-    const responsable = getResponsableDeEtapa(siniestro.tipo, siniestro.estado, siniestro);
-    return responsable === usuario.nombre;
-  }
+  // Todo el equipo de Pacífico (admin y terceros) puede avanzar y retroceder
+  // las cartas de cualquier siniestro entre etapas.
+  if (usuario.rol === 'admin' || usuario.rol === 'terceros') return true;
   return false;
 }
 
@@ -78,7 +84,8 @@ export function puedeVerRuta(usuario: Usuario | null, ruta: Ruta): boolean {
   if (!usuario) return false;
   switch (ruta) {
     case '/':
-      return usuario.rol !== 'viewer';
+      // Todos, incluidos los viewers (Marcos, María Elena), pueden ver el tablero.
+      return true;
     case '/nuevo':
       return puedeCrearSiniestro(usuario);
     case '/dashboard':

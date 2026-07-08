@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
-import type { Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
+import type { Moneda, Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
 import { cn, validarCodigo } from '@/lib/utils';
 import { getResponsableDeEtapa } from '@/lib/workflows';
 import { puedeCrearSiniestro } from '@/lib/permissions';
@@ -18,6 +18,12 @@ import {
 
 const EMAIL_PROVIDER_KEY = 'pacifico:email-provider';
 const EMAIL_AUTOSEND_KEY = 'pacifico:email-autosend';
+
+const PROVIDER_LABEL: Record<EmailProvider, string> = {
+  gmail: 'Gmail',
+  outlook: 'Outlook',
+  yahoo: 'Yahoo',
+};
 
 const TIPOS: {
   id: TipoSiniestro;
@@ -68,9 +74,16 @@ export function SiniestroForm({ abogados }: Props) {
   const [tipo, setTipo] = useState<TipoSiniestro>('pago');
   const [codigo, setCodigo] = useState('');
   const [monto, setMonto] = useState('');
+  const [moneda, setMoneda] = useState<Moneda>('PEN');
   const [aseguradoNombre, setAseguradoNombre] = useState('');
   const [dniTercero, setDniTercero] = useState('');
   const [correoAsegurado, setCorreoAsegurado] = useState('');
+  // Cheque (sub-opción dentro de Pago)
+  const [esCheque, setEsCheque] = useState(false);
+  const [chequeBanco, setChequeBanco] = useState('');
+  const [chequePersona, setChequePersona] = useState('');
+  const [chequeDni, setChequeDni] = useState('');
+  const [chequeDeduciblePagado, setChequeDeduciblePagado] = useState<boolean | null>(null);
   const [solicitanteOverride, setSolicitanteOverride] = useState('');
   const [agregarNota, setAgregarNota] = useState(false);
   const [notas, setNotas] = useState('');
@@ -85,7 +98,7 @@ export function SiniestroForm({ abogados }: Props) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const p = localStorage.getItem(EMAIL_PROVIDER_KEY);
-    if (p === 'gmail' || p === 'outlook') setEmailProvider(p);
+    if (p === 'gmail' || p === 'outlook' || p === 'yahoo') setEmailProvider(p);
     setAutoEnviar(localStorage.getItem(EMAIL_AUTOSEND_KEY) === '1');
   }, []);
 
@@ -107,8 +120,13 @@ export function SiniestroForm({ abogados }: Props) {
   const solicitante = solicitanteOverride || usuario!.nombre;
   const focusClass = inputFocusStyle[tipo];
 
+  // Valorización e Info Póliza solo requieren el número de siniestro.
+  const soloCodigo = tipo === 'valorizacion' || tipo === 'info_poliza';
+  const puedeSerCheque = tipo === 'pago';
+
   function validar(): string | null {
     if (!validarCodigo(codigo)) return 'El código debe tener exactamente 8 o 10 dígitos numéricos.';
+    if (soloCodigo) return null;
     if (!monto || isNaN(Number(monto)) || Number(monto) <= 0) return 'Ingresa un monto válido mayor a 0.';
     if (tipo === 'deducible') {
       if (!aseguradoNombre.trim()) return 'Indica el nombre del asegurado.';
@@ -116,6 +134,11 @@ export function SiniestroForm({ abogados }: Props) {
     } else {
       if (!aseguradoNombre.trim()) return 'Indica el nombre del tercero.';
       if (!dniTercero.trim()) return 'Indica el DNI del tercero.';
+    }
+    if (puedeSerCheque && esCheque) {
+      if (!chequeBanco.trim()) return 'Indica el nombre del banco del cheque.';
+      if (!chequePersona.trim()) return 'Indica la persona que recogerá el cheque.';
+      if (!chequeDni.trim()) return 'Indica el DNI de quien recogerá el cheque.';
     }
     return null;
   }
@@ -130,15 +153,23 @@ export function SiniestroForm({ abogados }: Props) {
     const estadoInicial = 'Solicitud recibida';
     const responsable = getResponsableDeEtapa(tipo, estadoInicial, { codigo });
 
+    const cheque = puedeSerCheque && esCheque;
+
     const payload = {
       codigo,
       tipo,
       estado: estadoInicial,
-      monto: Number(monto),
+      monto: soloCodigo ? null : Number(monto),
+      moneda: soloCodigo ? 'PEN' : moneda,
       solicitante,
-      asegurado_nombre: aseguradoNombre,
-      dni_tercero: tipo !== 'deducible' ? dniTercero : null,
+      asegurado_nombre: soloCodigo ? null : aseguradoNombre,
+      dni_tercero: !soloCodigo && tipo !== 'deducible' ? dniTercero : null,
       correo_asegurado: tipo === 'deducible' ? correoAsegurado : null,
+      es_cheque: cheque,
+      cheque_banco: cheque ? chequeBanco : null,
+      cheque_persona: cheque ? chequePersona : null,
+      cheque_dni: cheque ? chequeDni : null,
+      cheque_deducible_pagado: cheque ? chequeDeduciblePagado : null,
       notas: agregarNota && notas ? notas : null,
       asignado_a: responsable,
     };
@@ -267,51 +298,149 @@ export function SiniestroForm({ abogados }: Props) {
             className={cn(baseInput, focusClass, 'font-mono tabular-nums')}
           />
         </Field>
-        <Field label="Monto (PEN)">
-          <input
-            type="number"
-            step="0.01"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
-            placeholder="0.00"
-            inputMode="decimal"
-            className={cn(baseInput, focusClass)}
-          />
-        </Field>
+        {!soloCodigo && (
+          <Field label="Monto">
+            <div className="flex gap-2">
+              <input
+                type="number"
+                step="0.01"
+                value={monto}
+                onChange={(e) => setMonto(e.target.value)}
+                placeholder="0.00"
+                inputMode="decimal"
+                className={cn(baseInput, focusClass, 'flex-1')}
+              />
+              <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1 shrink-0">
+                <ProviderPill active={moneda === 'PEN'} onClick={() => setMoneda('PEN')}>
+                  S/ Soles
+                </ProviderPill>
+                <ProviderPill active={moneda === 'USD'} onClick={() => setMoneda('USD')}>
+                  $ Dólares
+                </ProviderPill>
+              </div>
+            </div>
+          </Field>
+        )}
       </div>
 
-      <Field label={tipo === 'deducible' ? 'Nombre del asegurado' : 'Nombre del tercero / asegurado'}>
-        <input
-          type="text"
-          value={aseguradoNombre}
-          onChange={(e) => setAseguradoNombre(e.target.value)}
-          className={cn(baseInput, focusClass)}
-        />
-      </Field>
+      {soloCodigo && (
+        <p className="rounded-lg border border-white/[0.06] bg-card/50 p-3 text-xs text-slate-400">
+          Para {tipo === 'valorizacion' ? 'valorizaciones' : 'información de póliza'} solo se necesita el número de siniestro.
+        </p>
+      )}
 
-      {tipo === 'deducible' ? (
-        <Field label="Correo del asegurado" hint="A este correo se enviará el cobro del deducible.">
-          <input
-            type="email"
-            value={correoAsegurado}
-            onChange={(e) => setCorreoAsegurado(e.target.value)}
-            placeholder="correo@ejemplo.com"
-            inputMode="email"
-            autoComplete="email"
-            className={cn(baseInput, focusClass)}
-          />
-        </Field>
-      ) : (
-        <Field label="DNI del tercero">
-          <input
-            type="text"
-            value={dniTercero}
-            onChange={(e) => setDniTercero(e.target.value)}
-            maxLength={12}
-            inputMode="numeric"
-            className={cn(baseInput, focusClass)}
-          />
-        </Field>
+      {!soloCodigo && (
+        <>
+          <Field label={tipo === 'deducible' ? 'Nombre del asegurado' : 'Nombre del tercero / asegurado'}>
+            <input
+              type="text"
+              value={aseguradoNombre}
+              onChange={(e) => setAseguradoNombre(e.target.value)}
+              className={cn(baseInput, focusClass)}
+            />
+          </Field>
+
+          {tipo === 'deducible' ? (
+            <Field label="Correo del asegurado" hint="A este correo se enviará el cobro del deducible.">
+              <input
+                type="email"
+                value={correoAsegurado}
+                onChange={(e) => setCorreoAsegurado(e.target.value)}
+                placeholder="correo@ejemplo.com"
+                inputMode="email"
+                autoComplete="email"
+                className={cn(baseInput, focusClass)}
+              />
+            </Field>
+          ) : (
+            <Field label="DNI del tercero">
+              <input
+                type="text"
+                value={dniTercero}
+                onChange={(e) => setDniTercero(e.target.value)}
+                maxLength={12}
+                inputMode="numeric"
+                className={cn(baseInput, focusClass)}
+              />
+            </Field>
+          )}
+        </>
+      )}
+
+      {/* Cheque — sub-opción dentro de Pago */}
+      {puedeSerCheque && (
+        <div className="rounded-lg border border-white/[0.06] bg-card/50 p-3 space-y-3">
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <span
+              onClick={() => setEsCheque((v) => !v)}
+              className={cn(
+                'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
+                esCheque ? 'border-cyan-500 bg-cyan-500' : 'border-slate-600 bg-card'
+              )}
+            >
+              {esCheque && (
+                <svg className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                </svg>
+              )}
+            </span>
+            <input type="checkbox" checked={esCheque} onChange={(e) => setEsCheque(e.target.checked)} className="sr-only" />
+            <span className="text-xs text-slate-300 leading-snug">
+              Este pago es un <strong className="text-slate-100">cheque</strong>
+              <span className="block text-[11px] text-slate-500 mt-0.5">
+                Registra el banco y quién lo recoge.
+              </span>
+            </span>
+          </label>
+
+          {esCheque && (
+            <div className="space-y-3 slide-in">
+              <Field label="Nombre del banco">
+                <input
+                  type="text"
+                  value={chequeBanco}
+                  onChange={(e) => setChequeBanco(e.target.value)}
+                  placeholder="Ej. BCP, Interbank…"
+                  className={cn(baseInput, focusClass)}
+                />
+              </Field>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Field label="Persona a recoger (nombre completo)">
+                  <input
+                    type="text"
+                    value={chequePersona}
+                    onChange={(e) => setChequePersona(e.target.value)}
+                    className={cn(baseInput, focusClass)}
+                  />
+                </Field>
+                <Field label="DNI de quien recoge">
+                  <input
+                    type="text"
+                    value={chequeDni}
+                    onChange={(e) => setChequeDni(e.target.value)}
+                    maxLength={12}
+                    inputMode="numeric"
+                    className={cn(baseInput, focusClass)}
+                  />
+                </Field>
+              </div>
+              <div>
+                <Label>¿Se pagó el deducible de este caso?</Label>
+                <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1">
+                  <ProviderPill active={chequeDeduciblePagado === true} onClick={() => setChequeDeduciblePagado(true)}>
+                    Sí pagó
+                  </ProviderPill>
+                  <ProviderPill active={chequeDeduciblePagado === false} onClick={() => setChequeDeduciblePagado(false)}>
+                    No pagó
+                  </ProviderPill>
+                  <ProviderPill active={chequeDeduciblePagado === null} onClick={() => setChequeDeduciblePagado(null)}>
+                    Sin indicar
+                  </ProviderPill>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {usuario?.rol === 'admin' && abogados.length > 0 && (
@@ -413,6 +542,9 @@ export function SiniestroForm({ abogados }: Props) {
             <ProviderPill active={emailProvider === 'outlook'} onClick={() => setEmailProvider('outlook')}>
               Outlook
             </ProviderPill>
+            <ProviderPill active={emailProvider === 'yahoo'} onClick={() => setEmailProvider('yahoo')}>
+              Yahoo
+            </ProviderPill>
           </div>
         </div>
 
@@ -439,7 +571,7 @@ export function SiniestroForm({ abogados }: Props) {
           <span className="text-xs text-slate-300 leading-snug">
             Enviar correo automáticamente al crear el siniestro
             <span className="block text-[11px] text-slate-500 mt-0.5">
-              Abre {emailProvider === 'gmail' ? 'Gmail' : 'Outlook'} en una pestaña nueva con el correo listo. Solo presionas enviar.
+              Abre {PROVIDER_LABEL[emailProvider]} en una pestaña nueva con el correo listo. Solo presionas enviar.
             </span>
           </span>
         </label>
@@ -545,6 +677,9 @@ function ConfirmacionCorreo({
             <ProviderPill active={provider === 'outlook'} onClick={() => cambiarProvider('outlook')}>
               Outlook
             </ProviderPill>
+            <ProviderPill active={provider === 'yahoo'} onClick={() => cambiarProvider('yahoo')}>
+              Yahoo
+            </ProviderPill>
           </div>
         </div>
 
@@ -575,7 +710,7 @@ function ConfirmacionCorreo({
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
             </svg>
-            Abrir {provider === 'gmail' ? 'Gmail' : 'Outlook'} y enviar
+            Abrir {PROVIDER_LABEL[provider]} y enviar
           </button>
           <button
             type="button"

@@ -156,7 +156,7 @@ export function buildCuerpo(s: Siniestro): string {
       `Actividad de ${tipoLabel}`,
       '',
       `Código de siniestro: ${s.codigo}`,
-      `Monto: ${formatMoneda(s.monto)}`,
+      `Monto: ${formatMoneda(s.monto, s.moneda)}`,
       `Correo del asegurado: ${s.correo_asegurado ?? '—'}`,
       `Nombre del asegurado: ${s.asegurado_nombre ?? '—'}`,
       `Solicitante: ${s.solicitante}`,
@@ -171,13 +171,29 @@ export function buildCuerpo(s: Siniestro): string {
   }
 
   return [
-    `Actividad de ${tipoLabel}`,
+    `Actividad de ${tipoLabel}${s.es_cheque ? ' (CHEQUE)' : ''}`,
     '',
     `Código de siniestro: ${s.codigo}`,
     `Nombre del beneficiario: ${s.asegurado_nombre ?? '—'}`,
     `DNI: ${s.dni_tercero ?? '—'}`,
-    `Monto: ${formatMoneda(s.monto)}`,
+    `Monto: ${formatMoneda(s.monto, s.moneda)}`,
     `Solicitante: ${s.solicitante}`,
+    ...(s.es_cheque
+      ? [
+          '',
+          'Datos del cheque:',
+          `· Banco: ${s.cheque_banco ?? '—'}`,
+          `· Persona a recoger: ${s.cheque_persona ?? '—'}`,
+          `· DNI de quien recoge: ${s.cheque_dni ?? '—'}`,
+          `· Deducible: ${
+            s.cheque_deducible_pagado == null
+              ? 'no indicado'
+              : s.cheque_deducible_pagado
+              ? 'PAGADO'
+              : 'NO pagado'
+          }`,
+        ]
+      : []),
     '',
     s.notas ? `Notas: ${s.notas}` : '',
     s.pdf_urls.length > 0
@@ -188,7 +204,7 @@ export function buildCuerpo(s: Siniestro): string {
     .join('\n');
 }
 
-export type EmailProvider = 'gmail' | 'outlook';
+export type EmailProvider = 'gmail' | 'outlook' | 'yahoo';
 
 /**
  * `mailto:` — fallback. No soporta adjuntos; los PDFs van como URLs en el cuerpo.
@@ -228,10 +244,24 @@ export function buildOutlookUrl(s: Siniestro, remitente?: Usuario | null): strin
   return `https://outlook.office.com/mail/deeplink/compose?${params.toString()}`;
 }
 
+/** Yahoo Mail web compose */
+export function buildYahooUrl(s: Siniestro, remitente?: Usuario | null): string {
+  const { to, cc } = getDestinatarios(s, remitente);
+  const params = new URLSearchParams({
+    to: to.join(','),
+    subject: buildAsunto(s),
+    body: buildCuerpo(s),
+  });
+  if (cc.length > 0) params.set('cc', cc.join(','));
+  return `https://compose.mail.yahoo.com/?${params.toString()}`;
+}
+
 export function buildEmailUrl(
   s: Siniestro,
   provider: EmailProvider,
   remitente?: Usuario | null
 ): string {
-  return provider === 'gmail' ? buildGmailUrl(s, remitente) : buildOutlookUrl(s, remitente);
+  if (provider === 'yahoo') return buildYahooUrl(s, remitente);
+  if (provider === 'outlook') return buildOutlookUrl(s, remitente);
+  return buildGmailUrl(s, remitente);
 }

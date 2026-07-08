@@ -22,6 +22,7 @@ import { cn, diasDesde } from '@/lib/utils';
 import { useUser } from './UserContext';
 import { puedeMover } from '@/lib/permissions';
 import { aplicarScope, scopeAmplio, scopeDefault, scopesDisponibles, type ScopeMode } from '@/lib/scope';
+import { aplicarVistaPredeterminada, tieneVistaPredeterminada } from '@/lib/vistas';
 
 interface Props {
   /** Si true, se cargan también los siniestros cerrados (histórico). Default false (solo activos + cierres recientes). */
@@ -71,6 +72,7 @@ const sectionAccentText: Record<TipoSiniestro, string> = {
 const MODE_STORAGE_KEY = 'pacifico:card-mode';
 // Bump al cambiar defaults (v2 = default es 'todos'/'estudio', no 'mios')
 const SCOPE_STORAGE_KEY = 'pacifico:scope-v2';
+const VISTA_STORAGE_KEY = 'pacifico:vista-predeterminada';
 
 export function KanbanBoard({ modoHistorico = false }: Props) {
   const { usuario, usuarios } = useUser();
@@ -87,6 +89,8 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [scope, setScope] = useState<ScopeMode>('todos');
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Vista predeterminada (Jack/Rosa/Christian): true = mi vista, false = todo Pacífico
+  const [vistaPropia, setVistaPropia] = useState(true);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -98,7 +102,13 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
     if (savedMode === 'compacto' || savedMode === 'detallado') setMode(savedMode);
     const savedScope = (typeof window !== 'undefined' && localStorage.getItem(SCOPE_STORAGE_KEY)) as ScopeMode | null;
     if (savedScope === 'mios' || savedScope === 'estudio' || savedScope === 'todos') setScope(savedScope);
+    const savedVista = typeof window !== 'undefined' ? localStorage.getItem(VISTA_STORAGE_KEY) : null;
+    if (savedVista === '0') setVistaPropia(false);
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem(VISTA_STORAGE_KEY, vistaPropia ? '1' : '0');
+  }, [vistaPropia]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem(MODE_STORAGE_KEY, mode);
@@ -162,14 +172,22 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
     [siniestros, usuario, scope, usuarios]
   );
 
+  const tieneVista = tieneVistaPredeterminada(usuario);
+
+  // Aplica la vista predeterminada del usuario (si la tiene y está activada).
+  const siniestrosEnVista = useMemo(() => {
+    if (!tieneVista || !vistaPropia) return siniestrosEnScope;
+    return aplicarVistaPredeterminada(siniestrosEnScope, usuario);
+  }, [siniestrosEnScope, tieneVista, vistaPropia, usuario]);
+
   const siniestrosTemporal = useMemo(() => {
-    if (modoHistorico) return siniestrosEnScope;
-    return siniestrosEnScope.filter((s) => {
+    if (modoHistorico) return siniestrosEnVista;
+    return siniestrosEnVista.filter((s) => {
       if (s.archived_at) return false;
       if (!s.closed_at) return true;
       return diasDesde(s.closed_at) <= 7;
     });
-  }, [siniestrosEnScope, modoHistorico]);
+  }, [siniestrosEnVista, modoHistorico]);
 
   const siniestrosFiltrados = useMemo(() => {
     return siniestrosTemporal.filter((s) => {
@@ -271,7 +289,7 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         <ChipGroup>
           {TIPO_CHIPS.map((c) => {
-            const count = c.id === 'todos' ? siniestrosEnScope.length : siniestrosEnScope.filter((s) => s.tipo === c.id).length;
+            const count = c.id === 'todos' ? siniestrosEnVista.length : siniestrosEnVista.filter((s) => s.tipo === c.id).length;
             const active = filtroTipo === c.id;
             return (
               <Chip key={c.id} active={active} onClick={() => setFiltroTipo(c.id)}>
@@ -338,6 +356,31 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
         )}
 
         <div className="ml-auto flex items-center gap-4 text-[11px] font-medium">
+          {/* Toggle vista predeterminada (Jack/Rosa/Christian) */}
+          {tieneVista && (
+            <div className="inline-flex rounded-md bg-white/[0.03] border border-white/[0.06] p-0.5">
+              <button
+                onClick={() => setVistaPropia(true)}
+                className={cn(
+                  'rounded px-2 py-1 transition',
+                  vistaPropia ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+                )}
+                title="Ver solo los casos de mi vista"
+              >
+                Mi vista
+              </button>
+              <button
+                onClick={() => setVistaPropia(false)}
+                className={cn(
+                  'rounded px-2 py-1 transition',
+                  !vistaPropia ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+                )}
+                title="Ver todos los casos de Pacífico"
+              >
+                Todo Pacífico
+              </button>
+            </div>
+          )}
           {/* Toggle discreto "Solo míos" — secundario al lado del contador */}
           {!vistaSimplificada && scopesUsuario.includes('mios') && (
             <button
@@ -369,7 +412,7 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
             </button>
           )}
           <span className="text-slate-500">
-            {modoHistorico ? <>Histórico · {siniestrosFiltrados.length}</> : <>Últimos 7d · {siniestrosFiltrados.length} de {siniestrosEnScope.length}</>}
+            {modoHistorico ? <>Histórico · {siniestrosFiltrados.length}</> : <>Últimos 7d · {siniestrosFiltrados.length} de {siniestrosEnVista.length}</>}
           </span>
         </div>
       </div>
