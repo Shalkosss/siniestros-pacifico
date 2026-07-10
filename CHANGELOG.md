@@ -4,7 +4,25 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ---
 
-## v6 — Seguridad IT + Cheques + Moneda + Vistas por usuario (actual)
+## v7.1 — Excel en el Drive (actual)
+
+### Nuevo
+- **Importar Excel al Drive** ([`lib/driveExcel.ts`](lib/driveExcel.ts), [`DriveBoard.tsx`](components/DriveBoard.tsx)):
+  - Sube el reporte mensual del estudio (.xlsx/.xls/.csv) y registra los casos en lote
+  - Reconocimiento automático de encabezados con alias ("N° SINIESTRO", "FECHA REGISTRO", "SETIEMBRE", etc.), fechas en serial de Excel o dd/mm/yyyy, montos con "S/" y comas
+  - Los abogados importan siempre a su estudio; Pacífico puede usar la columna ESTUDIO del Excel o fijar uno
+  - Casos ya registrados (mismo código + estudio) se omiten automáticamente; vista previa con conteo de listos/duplicados/errores antes de confirmar
+  - Inserción por lotes de 500 con progreso
+- **Exportar Excel desde el Drive**: descarga los casos visibles según los filtros activos (año, mes, estado, estudio, búsqueda) con el formato de la base consolidada
+- **Totales por mes**: cada sección muestra la suma de reserva inicial, reserva final y ahorro
+
+### Corregido
+- El Drive carga la base completa con paginación (antes Supabase cortaba en 1,000 de 3,519 registros); orden estable por `id`
+- El modal de Actualizaciones se renderiza vía portal (el `backdrop-filter` del header lo dejaba invisible)
+
+---
+
+## v6 — Seguridad IT + Cheques + Moneda + Vistas por usuario
 
 **Migración requerida:** `supabase/migration_v6.sql`
 

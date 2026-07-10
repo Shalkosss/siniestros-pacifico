@@ -16,6 +16,12 @@ import {
   esUnidadRetenida,
   estudioDriveDe,
 } from '@/lib/drive';
+import {
+  claveDuplicado,
+  exportDriveExcel,
+  parseDriveExcel,
+  type DriveImportResult,
+} from '@/lib/driveExcel';
 
 const baseInput =
   'w-full rounded-lg bg-card border border-white/[0.06] px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 transition focus:outline-none focus:bg-card-hover focus:border-[#06b6d4]';
@@ -33,6 +39,8 @@ export function DriveBoard() {
   const [registros, setRegistros] = useState<DriveSiniestro[]>([]);
   const [loading, setLoading] = useState(true);
   const [agregando, setAgregando] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [exportando, setExportando] = useState(false);
 
   // Filtros
   const [filtroAnio, setFiltroAnio] = useState<string>('');
@@ -144,6 +152,27 @@ export function DriveBoard() {
     return Array.from(map.entries()).filter(([, v]) => v.length > 0);
   }, [filtrados]);
 
+  /** Exporta lo que se está viendo (con los filtros activos) a un .xlsx */
+  async function onExportar() {
+    if (filtrados.length === 0 || exportando) return;
+    setExportando(true);
+    try {
+      const partes = ['drive_siniestros'];
+      if (filtroAnio) partes.push(filtroAnio);
+      if (filtroMes) partes.push(filtroMes.toLowerCase());
+      if (filtroEstado) partes.push(filtroEstado.toLowerCase() + 's');
+      if (esPacifico && filtroEstudio) partes.push(filtroEstudio.toLowerCase().replace(/\s+/g, '_'));
+      if (!esPacifico && estudioUsuario && estudioUsuario !== '__ninguno__') {
+        partes.push(estudioUsuario.toLowerCase().replace(/\s+/g, '_'));
+      }
+      await exportDriveExcel(filtrados, partes.join('_'));
+    } catch (e) {
+      alert('Error al exportar: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setExportando(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Título + acción */}
@@ -158,15 +187,40 @@ export function DriveBoard() {
             {' '}· {visibles.length.toLocaleString('es-PE')} registros
           </p>
         </div>
-        <button
-          onClick={() => setAgregando(true)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-pago px-3.5 py-2 text-sm font-semibold text-white hover:bg-cyan-600 transition shadow-sm"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
-          </svg>
-          Agregar siniestro
-        </button>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            onClick={onExportar}
+            disabled={exportando || filtrados.length === 0}
+            title="Descargar en Excel los casos visibles (según los filtros)"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-sm font-medium text-slate-300 hover:bg-white/[0.06] hover:text-white transition disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10 3a1 1 0 011 1v6.586l1.793-1.793a1 1 0 111.414 1.414l-3.5 3.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 111.414-1.414L9 10.586V4a1 1 0 011-1z" />
+              <path d="M4 14a1 1 0 011 1v1h10v-1a1 1 0 112 0v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1a1 1 0 011-1z" />
+            </svg>
+            {exportando ? 'Exportando…' : 'Exportar Excel'}
+          </button>
+          <button
+            onClick={() => setImportando(true)}
+            title="Subir un Excel con siniestros y registrarlos en lote"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-sm font-medium text-slate-300 hover:bg-white/[0.06] hover:text-white transition"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10 17a1 1 0 01-1-1V9.414l-1.793 1.793a1 1 0 11-1.414-1.414l3.5-3.5a1 1 0 011.414 0l3.5 3.5a1 1 0 11-1.414 1.414L11 9.414V16a1 1 0 01-1 1z" />
+              <path d="M4 4a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z" />
+            </svg>
+            Importar Excel
+          </button>
+          <button
+            onClick={() => setAgregando(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-pago px-3.5 py-2 text-sm font-semibold text-white hover:bg-cyan-600 transition shadow-sm"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
+            </svg>
+            Agregar siniestro
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -247,6 +301,19 @@ export function DriveBoard() {
           }}
         />
       )}
+
+      {importando && (
+        <ImportarDriveModal
+          estudioFijo={esPacifico ? null : estudioUsuario === '__ninguno__' ? null : estudioUsuario}
+          creadoPor={usuario?.nombre ?? 'desconocido'}
+          registrosExistentes={registros}
+          onClose={() => setImportando(false)}
+          onImported={() => {
+            setImportando(false);
+            void cargar();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -269,6 +336,11 @@ function MesSection({
   const [abierto, setAbierto] = useState(true);
   const abiertos = items.filter((r) => r.estado === 'ABIERTO').length;
   const fallecidos = items.filter((r) => esFallecido(r)).length;
+
+  // Totales del mes para la métrica legal
+  const totReservaIni = items.reduce((s, r) => s + (r.reserva_inicial ?? 0), 0);
+  const totReservaFin = items.reduce((s, r) => s + (r.reserva_final ?? 0), 0);
+  const totAhorro = items.reduce((s, r) => s + (r.ahorro ?? 0), 0);
 
   return (
     <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
@@ -297,6 +369,12 @@ function MesSection({
             {fallecidos} con fallecido
           </span>
         )}
+        {/* Totales del mes (desktop) */}
+        <span className="ml-auto hidden lg:flex items-center gap-3 text-[11px] tabular-nums text-slate-500">
+          <span>Reserva ini. <span className="text-slate-300">{fmtMonto(totReservaIni)}</span></span>
+          <span>Reserva fin. <span className="text-slate-300">{fmtMonto(totReservaFin)}</span></span>
+          <span>Ahorro <span className="text-emerald-300/90">{fmtMonto(totAhorro)}</span></span>
+        </span>
       </button>
 
       {abierto && (
@@ -718,6 +796,274 @@ function FField({ label, children }: { label: string; children: React.ReactNode 
         {label}
       </label>
       {children}
+    </div>
+  );
+}
+
+/* ---------------- Modal Importar Excel ---------------- */
+
+function ImportarDriveModal({
+  estudioFijo,
+  creadoPor,
+  registrosExistentes,
+  onClose,
+  onImported,
+}: {
+  /** null = Pacífico (elige estudio default); string = estudio fijo del abogado */
+  estudioFijo: string | null;
+  creadoPor: string;
+  registrosExistentes: DriveSiniestro[];
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [nombreArchivo, setNombreArchivo] = useState<string | null>(null);
+  const [buffer, setBuffer] = useState<ArrayBuffer | string | null>(null);
+  const [resultado, setResultado] = useState<DriveImportResult | null>(null);
+  const [estudioDefault, setEstudioDefault] = useState('');
+  const [analizando, setAnalizando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [progreso, setProgreso] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !guardando) onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, guardando]);
+
+  // Claves estudio::siniestro ya presentes en la base, para omitir duplicados
+  const existentes = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of registrosExistentes) set.add(claveDuplicado(r.estudio, r.siniestro));
+    return set;
+  }, [registrosExistentes]);
+
+  async function analizar(buf: ArrayBuffer | string, estudioDef: string) {
+    setAnalizando(true);
+    setError(null);
+    setResultado(null);
+    try {
+      const res = await parseDriveExcel(buf, {
+        estudioDefault: estudioFijo ?? (estudioDef || null),
+        forzarEstudio: estudioFijo !== null,
+        creadoPor,
+        existentes,
+      });
+      setResultado(res);
+    } catch (e) {
+      setError('No se pudo leer el archivo: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setAnalizando(false);
+    }
+  }
+
+  async function onArchivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setNombreArchivo(f.name);
+    // CSV se lee como texto para respetar UTF-8 (tildes, Ñ, °); Excel como binario
+    const buf = f.name.toLowerCase().endsWith('.csv') ? await f.text() : await f.arrayBuffer();
+    setBuffer(buf);
+    void analizar(buf, estudioDefault);
+  }
+
+  function onCambioEstudio(v: string) {
+    setEstudioDefault(v);
+    if (buffer) void analizar(buffer, v);
+  }
+
+  async function onImportar() {
+    if (!resultado || resultado.filas.length === 0 || guardando) return;
+    setGuardando(true);
+    setError(null);
+    const LOTE = 500;
+    try {
+      for (let i = 0; i < resultado.filas.length; i += LOTE) {
+        const { error: insErr } = await supabase
+          .from('drive_siniestros')
+          .insert(resultado.filas.slice(i, i + LOTE));
+        if (insErr) throw new Error(insErr.message);
+        setProgreso(Math.min(resultado.filas.length, i + LOTE));
+      }
+      onImported();
+    } catch (e) {
+      setError(
+        'Error al guardar: ' + (e instanceof Error ? e.message : String(e)) +
+        (progreso > 0 ? ` (se alcanzaron a guardar ${progreso} casos; corrige el archivo y vuelve a subirlo — los ya guardados se omitirán como duplicados)` : '')
+      );
+      setGuardando(false);
+    }
+  }
+
+  const listos = resultado?.filas.length ?? 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm fade-in p-4 sm:p-8 overflow-y-auto"
+      onClick={() => !guardando && onClose()}
+    >
+      <div
+        className="w-full max-w-2xl rounded-2xl border border-white/10 bg-ink-800 shadow-2xl text-slate-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-white">Importar siniestros desde Excel</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Sube el reporte mensual (.xlsx, .xls o .csv). Reconocemos las columnas automáticamente y
+              adaptamos los datos al formato de la base. Los casos ya registrados se omiten.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={guardando}
+            className="rounded-full p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition disabled:opacity-40"
+            aria-label="Cerrar"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] overflow-y-auto px-5 py-4 space-y-4">
+          {/* Paso 1: estudio (solo Pacífico) + archivo */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {estudioFijo === null && (
+              <FField label="Estudio (si el Excel no lo indica)">
+                <select value={estudioDefault} onChange={(e) => onCambioEstudio(e.target.value)} className={baseInput}>
+                  <option value="" className="bg-ink-800">— Usar columna ESTUDIO del Excel —</option>
+                  {DRIVE_ESTUDIOS.map((es) => (
+                    <option key={es} value={es} className="bg-ink-800">{es}</option>
+                  ))}
+                </select>
+              </FField>
+            )}
+            <FField label="Archivo Excel *">
+              <label className={cn(
+                baseInput,
+                'flex items-center gap-2 cursor-pointer hover:bg-card-hover',
+                guardando && 'pointer-events-none opacity-50'
+              )}>
+                <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M10 17a1 1 0 01-1-1V9.414l-1.793 1.793a1 1 0 11-1.414-1.414l3.5-3.5a1 1 0 011.414 0l3.5 3.5a1 1 0 11-1.414 1.414L11 9.414V16a1 1 0 01-1 1z" />
+                  <path d="M4 4a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1z" />
+                </svg>
+                <span className="truncate text-slate-300">{nombreArchivo ?? 'Elegir archivo…'}</span>
+                <input type="file" accept=".xlsx,.xls,.csv" onChange={onArchivo} className="hidden" />
+              </label>
+            </FField>
+          </div>
+
+          {estudioFijo !== null && (
+            <p className="text-[11px] text-slate-500">
+              Todos los casos se registrarán a nombre de <span className="text-slate-300">{estudioFijo}</span>.
+            </p>
+          )}
+
+          {analizando && <div className="py-6 text-center text-sm text-slate-500">Analizando el archivo…</div>}
+
+          {/* Paso 2: resumen del análisis */}
+          {resultado && !analizando && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                  {listos} casos listos para importar
+                </span>
+                {resultado.duplicados.length > 0 && (
+                  <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-300"
+                        title={resultado.duplicados.slice(0, 20).join(', ')}>
+                    {resultado.duplicados.length} ya registrados (se omiten)
+                  </span>
+                )}
+                {resultado.errores.length > 0 && (
+                  <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-[11px] font-medium text-red-300">
+                    {resultado.errores.length} filas con problemas
+                  </span>
+                )}
+              </div>
+
+              {resultado.columnasIgnoradas.length > 0 && (
+                <p className="text-[11px] text-slate-500">
+                  Columnas no reconocidas (se ignoran): {resultado.columnasIgnoradas.join(' · ')}
+                </p>
+              )}
+
+              {resultado.errores.length > 0 && (
+                <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 space-y-1">
+                  {resultado.errores.slice(0, 5).map((e, i) => (
+                    <p key={i} className="text-[12px] text-red-300/90">{e}</p>
+                  ))}
+                  {resultado.errores.length > 5 && (
+                    <p className="text-[11px] text-red-300/60">…y {resultado.errores.length - 5} más.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Vista previa */}
+              {listos > 0 && (
+                <div className="rounded-lg border border-white/[0.06] overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-white/[0.06]">
+                        <Th>Siniestro</Th><Th>Año</Th><Th>Mes</Th><Th>Abogado</Th><Th>Lesión principal</Th><Th>Estado</Th><Th>Estudio</Th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {resultado.filas.slice(0, 5).map((f, i) => (
+                        <tr key={i}>
+                          <Td className="font-mono">{f.siniestro}</Td>
+                          <Td>{f.anio ?? '—'}</Td>
+                          <Td>{f.mes ?? '—'}</Td>
+                          <Td>{f.abogado ?? '—'}</Td>
+                          <Td>{f.lesion_principal ?? '—'}</Td>
+                          <Td>{f.estado}</Td>
+                          <Td>{f.estudio}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {listos > 5 && (
+                    <p className="px-3 py-2 text-[11px] text-slate-500 border-t border-white/[0.06]">
+                      …y {(listos - 5).toLocaleString('es-PE')} casos más.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 border-t border-white/[0.06] px-5 py-4">
+          <button
+            type="button"
+            onClick={onImportar}
+            disabled={listos === 0 || guardando || analizando}
+            className="inline-flex items-center rounded-lg bg-pago px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600 transition disabled:opacity-50"
+          >
+            {guardando
+              ? `Guardando… ${progreso}/${listos}`
+              : listos > 0
+              ? `Importar ${listos.toLocaleString('es-PE')} casos`
+              : 'Importar'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={guardando}
+            className="inline-flex items-center rounded-lg border border-white/[0.08] px-4 py-2 text-sm font-medium text-slate-400 hover:bg-white/[0.03] hover:text-slate-200 transition disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

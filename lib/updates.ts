@@ -12,6 +12,17 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-07-10',
+    fecha: '2026-07-10',
+    titulo: 'Excel en el Drive',
+    items: [
+      'Importar Excel en el Drive: sube el reporte mensual de tu estudio (.xlsx, .xls o .csv) y los casos se registran en lote. Reconocemos las columnas automáticamente y los casos ya registrados se omiten para no duplicar.',
+      'Exportar Excel desde el Drive: descarga los casos que estás viendo según los filtros (por ejemplo, todos los de Enero 2025) con el formato de la base consolidada.',
+      'Totales por mes en el Drive: cada mes muestra la suma de reserva inicial, reserva final y ahorro.',
+      'El Drive ahora carga la base completa (antes solo se veían los primeros 1,000 registros).',
+    ],
+  },
+  {
     id: '2026-07-08',
     fecha: '2026-07-08',
     titulo: 'Correcciones y mejoras',
