@@ -107,6 +107,18 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           {siniestro.monto != null && (
             <div className="text-[13px] font-semibold text-slate-100">{formatMoneda(siniestro.monto, siniestro.moneda)}</div>
           )}
+          {siniestro.tipo === 'pago' && siniestro.deducible_pagado != null && (
+            <div
+              className={cn(
+                'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                siniestro.deducible_pagado
+                  ? 'bg-emerald-500/15 text-emerald-400'
+                  : 'bg-red-500/15 text-red-400'
+              )}
+            >
+              Deducible {siniestro.deducible_pagado ? 'pagado' : 'no pagado'}
+            </div>
+          )}
         </div>
 
         {siniestro.asignado_a && (

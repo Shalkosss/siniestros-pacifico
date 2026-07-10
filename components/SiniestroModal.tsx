@@ -196,10 +196,11 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
 
   async function actualizarDeduciblePagado(valor: boolean) {
     if (!puedeMoverEnGeneral) return;
-    const nuevo = siniestro.cheque_deducible_pagado === valor ? null : valor;
+    // Toggle: si ya estaba en ese valor, vuelve a "sin indicar" (null).
+    const nuevo = siniestro.deducible_pagado === valor ? null : valor;
     const { error } = await supabase
       .from('siniestros')
-      .update({ cheque_deducible_pagado: nuevo })
+      .update({ deducible_pagado: nuevo })
       .eq('id', siniestro.id);
     if (error) { alert('Error: ' + error.message); return; }
     onChanged();
@@ -406,32 +407,65 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                 <DataLine label="Banco" value={siniestro.cheque_banco ?? '—'} />
                 <DataLine label="Recoge" value={censurar(siniestro.cheque_persona, censura)} />
                 <DataLine label="DNI recoge" value={censurar(siniestro.cheque_dni, censura)} />
-                <DataLine
-                  label="Deducible"
-                  value={
-                    siniestro.cheque_deducible_pagado == null
-                      ? 'Sin indicar'
-                      : siniestro.cheque_deducible_pagado
-                      ? 'Pagado'
-                      : 'No pagado'
-                  }
-                />
-                {puedeMoverEnGeneral && (
-                  <div className="px-3 py-2 flex items-center gap-2">
-                    <span className="text-[11px] text-slate-500">Marcar deducible:</span>
-                    <button
-                      onClick={() => actualizarDeduciblePagado(true)}
-                      className={cn('rounded px-2 py-0.5 text-[11px] border transition', siniestro.cheque_deducible_pagado === true ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300' : 'border-white/10 text-slate-400 hover:text-white')}
+              </div>
+            )}
+
+            {/* Deducible — aplica a todos los pagos. Lo ven todos; lo marca Pacífico. */}
+            {siniestro.tipo === 'pago' && !editMode && (
+              <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                      Deducible
+                    </div>
+                    <div
+                      className={cn(
+                        'mt-0.5 text-sm font-semibold',
+                        siniestro.deducible_pagado == null
+                          ? 'text-slate-400'
+                          : siniestro.deducible_pagado
+                          ? 'text-emerald-300'
+                          : 'text-red-300'
+                      )}
                     >
-                      Pagado
-                    </button>
-                    <button
-                      onClick={() => actualizarDeduciblePagado(false)}
-                      className={cn('rounded px-2 py-0.5 text-[11px] border transition', siniestro.cheque_deducible_pagado === false ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-white/10 text-slate-400 hover:text-white')}
-                    >
-                      No pagado
-                    </button>
+                      {siniestro.deducible_pagado == null
+                        ? 'Sin indicar'
+                        : siniestro.deducible_pagado
+                        ? 'Pagado'
+                        : 'No pagado'}
+                    </div>
                   </div>
+                  {puedeMoverEnGeneral && (
+                    <div className="inline-flex gap-1.5">
+                      <button
+                        onClick={() => actualizarDeduciblePagado(true)}
+                        className={cn(
+                          'rounded-md px-2.5 py-1 text-[11px] font-medium border transition',
+                          siniestro.deducible_pagado === true
+                            ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+                            : 'border-white/10 text-slate-400 hover:text-white'
+                        )}
+                      >
+                        Pagado
+                      </button>
+                      <button
+                        onClick={() => actualizarDeduciblePagado(false)}
+                        className={cn(
+                          'rounded-md px-2.5 py-1 text-[11px] font-medium border transition',
+                          siniestro.deducible_pagado === false
+                            ? 'border-red-500/50 bg-red-500/15 text-red-300'
+                            : 'border-white/10 text-slate-400 hover:text-white'
+                        )}
+                      >
+                        No pagado
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {puedeMoverEnGeneral && (
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    Vuelve a tocar el mismo botón para dejarlo en “Sin indicar”.
+                  </p>
                 )}
               </div>
             )}

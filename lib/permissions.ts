@@ -78,13 +78,16 @@ export function textoMover(siniestro: Siniestro): string | null {
  *   - admin/terceros: Tablero + Histórico + KPIs.
  *   - viewer (jefatura): Histórico + KPIs.
  */
-export type Ruta = '/' | '/dashboard' | '/historico' | '/nuevo';
+export type Ruta = '/' | '/dashboard' | '/historico' | '/nuevo' | '/drive';
 
 export function puedeVerRuta(usuario: Usuario | null, ruta: Ruta): boolean {
   if (!usuario) return false;
   switch (ruta) {
     case '/':
       // Todos, incluidos los viewers (Marcos, María Elena), pueden ver el tablero.
+      return true;
+    case '/drive':
+      // Drive de Siniestros: todos lo ven; el filtrado por estudio se hace adentro.
       return true;
     case '/nuevo':
       return puedeCrearSiniestro(usuario);

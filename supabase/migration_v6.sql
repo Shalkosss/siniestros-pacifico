@@ -26,6 +26,11 @@ alter table public.siniestros
 alter table public.siniestros
   add column if not exists cheque_deducible_pagado boolean;
 
+-- Deducible pagado — aplica a TODOS los pagos (no solo cheques).
+-- Lo marca Pacífico desde el tablero. null = sin indicar; true/false = pagado/no.
+alter table public.siniestros
+  add column if not exists deducible_pagado boolean;
+
 -- Ajuste manual del conteo de días (lo fija Pacífico)
 -- dias_ajuste = N° de días hábiles base al momento de dias_ajuste_fecha
 alter table public.siniestros

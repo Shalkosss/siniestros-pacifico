@@ -20,13 +20,23 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
   - Toggle clicable PEN/USD en el formulario y editable en el modal
   - `formatMoneda(monto, moneda)` respeta la moneda en tarjetas, modal y correo
 - **Cheques** (sub-opción dentro de Pago):
-  - Checkbox "Es cheque" que pide banco, persona a recoger, su DNI e indicación de si el deducible fue pagado (Sí/No/Sin indicar)
+  - Checkbox "Es cheque" que pide banco, persona a recoger y su DNI
   - Visible y editable en el modal; incluido en el cuerpo del correo
+- **Deducible pagado** (todos los pagos): estado Pagado / No pagado / Sin indicar
+  - Se marca desde el tablero (modal del siniestro), solo por Pacífico; lo ven todos
+  - Indicador visible en la tarjeta y en el correo
 - **Correos @yahoo.com**: nuevo proveedor Yahoo junto a Gmail/Outlook en los 3 selectores
 - **Vistas por integrante de Pacífico** ([`lib/vistas.ts`](lib/vistas.ts)):
   - Jack → pagos/reembolsos de 10 dígitos · Christian → 8 dígitos · Rosita → deducibles
   - Arrancan en "Mi vista"; botón para alternar a "Todo Pacífico"
 - **Conteo de días hábiles**: el conteo excluye sábados y domingos; Pacífico puede fijar el N° de días base de un siniestro o restablecerlo
+- **Drive de Siniestros** (`/drive`, migración `supabase/migration_v7.sql` + seed `supabase/drive_seed.sql`):
+  - Base consolidada de la métrica legal (3,519 registros importados del Excel)
+  - Vista por estudio: cada estudio solo ve sus siniestros; Pacífico ve todo con filtro por estudio
+  - Registros agrupados por mes, con filtros de año/mes/estado y búsqueda
+  - Botón "Agregar siniestro" con formulario estructurado (catálogos de lesiones, sub estados, gravedad, etc. idénticos al Excel); año y mes se derivan de la fecha de registro
+  - **Alertas visuales**: casos con fallecido resaltados en rojo con ícono, unidades retenidas en ámbar con ícono de vehículo. Autodetección por texto (lesiones/sub estado) + toggle manual editable por fila (`flag_fallecido`, `flag_unidad_retenida`; null = automático)
+  - **Distinción abierto/cerrado**: tinte rojo suave para abiertos y verde para cerrados en cada fila, chips de estado en el mismo código de color
 
 ### Cambios
 - **Movimiento de cartas en ambos sentidos**: todo el equipo de Pacífico (admin y terceros) puede avanzar y **retroceder** cualquier siniestro entre etapas ([`lib/permissions.ts`](lib/permissions.ts))

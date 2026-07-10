@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { APP_UPDATES, LATEST_UPDATE_ID } from '@/lib/updates';
 import { cn } from '@/lib/utils';
 
@@ -96,6 +97,9 @@ export function UpdatesBanner() {
 }
 
 function UpdatesModal({ onClose }: { onClose: () => void }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -104,7 +108,11 @@ function UpdatesModal({ onClose }: { onClose: () => void }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  if (!mounted) return null;
+
+  // Portal a document.body: el Header usa backdrop-filter, lo que rompería el
+  // posicionamiento fixed si el modal se renderizara dentro de él.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm fade-in p-4 sm:p-8 overflow-y-auto"
       onClick={onClose}
@@ -144,6 +152,7 @@ function UpdatesModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

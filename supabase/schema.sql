@@ -75,6 +75,7 @@ alter table public.siniestros add column if not exists cheque_banco text;
 alter table public.siniestros add column if not exists cheque_persona text;
 alter table public.siniestros add column if not exists cheque_dni text;
 alter table public.siniestros add column if not exists cheque_deducible_pagado boolean;
+alter table public.siniestros add column if not exists deducible_pagado boolean;
 alter table public.siniestros add column if not exists dias_ajuste integer;
 alter table public.siniestros add column if not exists dias_ajuste_fecha timestamptz;
 

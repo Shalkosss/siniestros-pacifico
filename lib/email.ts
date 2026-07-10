@@ -178,6 +178,17 @@ export function buildCuerpo(s: Siniestro): string {
     `DNI: ${s.dni_tercero ?? '—'}`,
     `Monto: ${formatMoneda(s.monto, s.moneda)}`,
     `Solicitante: ${s.solicitante}`,
+    ...(s.tipo === 'pago'
+      ? [
+          `Deducible: ${
+            s.deducible_pagado == null
+              ? 'no indicado'
+              : s.deducible_pagado
+              ? 'PAGADO'
+              : 'NO pagado'
+          }`,
+        ]
+      : []),
     ...(s.es_cheque
       ? [
           '',
@@ -185,13 +196,6 @@ export function buildCuerpo(s: Siniestro): string {
           `· Banco: ${s.cheque_banco ?? '—'}`,
           `· Persona a recoger: ${s.cheque_persona ?? '—'}`,
           `· DNI de quien recoge: ${s.cheque_dni ?? '—'}`,
-          `· Deducible: ${
-            s.cheque_deducible_pagado == null
-              ? 'no indicado'
-              : s.cheque_deducible_pagado
-              ? 'PAGADO'
-              : 'NO pagado'
-          }`,
         ]
       : []),
     '',

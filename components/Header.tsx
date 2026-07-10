@@ -11,6 +11,7 @@ import { puedeCrearSiniestro, puedeVerRuta, type Ruta } from '@/lib/permissions'
 
 const NAV: { href: Ruta; label: string }[] = [
   { href: '/', label: 'Tablero' },
+  { href: '/drive', label: 'Drive' },
   { href: '/historico', label: 'Histórico' },
   { href: '/dashboard', label: 'KPIs' },
 ];

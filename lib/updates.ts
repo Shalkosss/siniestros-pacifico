@@ -23,6 +23,9 @@ export const APP_UPDATES: AppUpdate[] = [
       'Valorización e Información de póliza: ahora solo piden el número de siniestro para registrarse.',
       'Vistas por integrante de Pacífico (Jack, Rosa, Christian) con opción de ver "Todo Pacífico".',
       'El conteo de días ya no cuenta sábados ni domingos, y Pacífico puede ajustar los días de un siniestro.',
+      'Nueva sección "Drive de Siniestros": la base consolidada de la métrica legal, separada por meses. Cada estudio ve solo sus siniestros y puede agregar nuevos con el formato estándar.',
+      'Alertas en el Drive: los casos con fallecido se resaltan en rojo con su ícono, y las unidades retenidas en ámbar con un vehículo. Se detectan automáticamente y también se pueden marcar/desmarcar a mano.',
+      'En el Drive los casos abiertos y cerrados se distinguen por color (rojo suave = abierto, verde = cerrado).',
     ],
   },
 ];

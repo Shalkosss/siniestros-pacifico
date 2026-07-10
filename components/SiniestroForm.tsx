@@ -83,7 +83,6 @@ export function SiniestroForm({ abogados }: Props) {
   const [chequeBanco, setChequeBanco] = useState('');
   const [chequePersona, setChequePersona] = useState('');
   const [chequeDni, setChequeDni] = useState('');
-  const [chequeDeduciblePagado, setChequeDeduciblePagado] = useState<boolean | null>(null);
   const [solicitanteOverride, setSolicitanteOverride] = useState('');
   const [agregarNota, setAgregarNota] = useState(false);
   const [notas, setNotas] = useState('');
@@ -169,7 +168,6 @@ export function SiniestroForm({ abogados }: Props) {
       cheque_banco: cheque ? chequeBanco : null,
       cheque_persona: cheque ? chequePersona : null,
       cheque_dni: cheque ? chequeDni : null,
-      cheque_deducible_pagado: cheque ? chequeDeduciblePagado : null,
       notas: agregarNota && notas ? notas : null,
       asignado_a: responsable,
     };
@@ -423,20 +421,6 @@ export function SiniestroForm({ abogados }: Props) {
                     className={cn(baseInput, focusClass)}
                   />
                 </Field>
-              </div>
-              <div>
-                <Label>¿Se pagó el deducible de este caso?</Label>
-                <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1">
-                  <ProviderPill active={chequeDeduciblePagado === true} onClick={() => setChequeDeduciblePagado(true)}>
-                    Sí pagó
-                  </ProviderPill>
-                  <ProviderPill active={chequeDeduciblePagado === false} onClick={() => setChequeDeduciblePagado(false)}>
-                    No pagó
-                  </ProviderPill>
-                  <ProviderPill active={chequeDeduciblePagado === null} onClick={() => setChequeDeduciblePagado(null)}>
-                    Sin indicar
-                  </ProviderPill>
-                </div>
               </div>
             </div>
           )}
