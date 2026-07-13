@@ -5,13 +5,13 @@ export interface EtapaConfig {
   responsableFn: (siniestro: Pick<Siniestro, 'codigo'>) => string;
 }
 
-/** Workflow estándar de Pago (también usado por Valorización e Info Póliza por default) */
+/**
+ * Workflow estándar de Pago (también usado por Valorización e Info Póliza por default).
+ * v8: se eliminó la etapa "Actividad creada" — la creación de la actividad ahora
+ * ocurre dentro de "Solicitud recibida" (proceso reducido).
+ */
 const WORKFLOW_PAGO: EtapaConfig[] = [
   { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
-  {
-    nombre: 'Actividad creada',
-    responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
-  },
   {
     nombre: 'En proceso de firmas',
     responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
@@ -31,8 +31,7 @@ export const WORKFLOWS: Record<TipoSiniestro, EtapaConfig[]> = {
   valorizacion: WORKFLOW_PAGO,
   info_poliza: WORKFLOW_PAGO,
   deducible: [
-    { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
-    { nombre: 'Actividad creada', responsableFn: () => 'Rosita' },
+    { nombre: 'Solicitud recibida', responsableFn: () => 'Rosita' },
     { nombre: 'Correo enviado', responsableFn: () => 'Rodrigo' },
     { nombre: 'Cobrado', responsableFn: () => 'Rodrigo' },
   ],

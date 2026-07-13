@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { UserSelector } from './UserSelector';
 import { NotificationBell } from './NotificationBell';
 import { UpdatesButton } from './UpdatesAnnouncement';
+import { SugerenciasButton } from './SugerenciasBox';
 import { cn } from '@/lib/utils';
 import { useUser } from './UserContext';
 import { puedeCrearSiniestro, puedeVerRuta, type Ruta } from '@/lib/permissions';
@@ -83,6 +84,7 @@ export function Header() {
             </>
           )}
 
+          <SugerenciasButton />
           <UpdatesButton />
 
           {/* Campana solo en desktop */}

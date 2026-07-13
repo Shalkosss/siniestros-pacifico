@@ -19,7 +19,9 @@ import {
 import { esEtapaFinal } from '@/lib/workflows';
 import {
   buildAsunto,
+  buildComposeUrl,
   buildCuerpo,
+  buildEmailRecordatorio,
   buildEmailUrl,
   getDestinatarios,
   type EmailProvider,
@@ -398,6 +400,36 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
               </div>
             )}
 
+            {/* Pago en cuenta */}
+            {siniestro.es_pago_cuenta && !editMode && (
+              <div className="mt-3 rounded-lg border border-teal-500/25 bg-teal-500/[0.05] px-3 py-2.5 flex items-center gap-2">
+                <svg className="h-4 w-4 shrink-0 text-teal-300" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M10 2L2 7h16l-8-5z" />
+                  <path d="M4 8v6h2V8H4zm5 0v6h2V8H9zm5 0v6h2V8h-2zM2 16h16v2H2v-2z" />
+                </svg>
+                <div className="text-xs">
+                  <span className="font-semibold text-teal-200">Pago en cuenta bancaria</span>
+                  <span className="block text-[11px] text-slate-400">La ficha de matrícula está en los PDFs adjuntos.</span>
+                </div>
+              </div>
+            )}
+
+            {/* Beneficiarios múltiples */}
+            {(siniestro.beneficiarios?.length ?? 0) > 1 && !editMode && (
+              <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5">
+                <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                  Beneficiarios ({siniestro.beneficiarios!.length})
+                </div>
+                {siniestro.beneficiarios!.map((b, i) => (
+                  <DataLine
+                    key={i}
+                    label={`${i + 1}. ${censurar(b.nombre, censura)}`}
+                    value={`DNI ${censurar(b.dni, censura)}`}
+                  />
+                ))}
+              </div>
+            )}
+
             {/* Bloque Cheque */}
             {siniestro.es_cheque && !editMode && (
               <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] divide-y divide-white/5">
@@ -535,6 +567,16 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
 
           {/* Enviar / Reenviar correo de notificación */}
           <EnviarCorreoSection siniestro={siniestro} remitente={usuario ?? null} onChanged={onChanged} />
+
+          {/* Recordatorio de gestión (para abogados y admin) */}
+          {!isFinal && !isArchivado && (usuario?.rol === 'abogado' || usuario?.rol === 'admin') && (
+            <RecordatorioSection
+              siniestro={siniestro}
+              remitente={usuario ?? null}
+              diasTotales={diasAbierto}
+              diasEnEtapa={diasEnEtapaActual}
+            />
+          )}
 
           {/* Historial */}
           {movimientos.length > 0 && (
@@ -905,6 +947,96 @@ function EnviarCorreoSection({
               <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
             </svg>
             {enviando ? 'Abriendo…' : `Abrir ${PROVIDER_LABEL_MODAL[provider]} y enviar`}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- Recordatorio de gestión (abogados/admin) ---------------- */
+
+function RecordatorioSection({
+  siniestro,
+  remitente,
+  diasTotales,
+  diasEnEtapa,
+}: {
+  siniestro: Siniestro;
+  remitente: Usuario | null;
+  diasTotales: number;
+  diasEnEtapa: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [provider, setProvider] = useState<EmailProvider>('gmail');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem(EMAIL_PROVIDER_KEY);
+    if (saved === 'gmail' || saved === 'outlook' || saved === 'yahoo') setProvider(saved);
+  }, []);
+
+  const contenido = buildEmailRecordatorio(siniestro, diasTotales, diasEnEtapa, remitente);
+
+  function enviar() {
+    window.open(buildComposeUrl(provider, contenido), '_blank', 'noopener');
+  }
+
+  return (
+    <section className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+      >
+        <span className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-amber-300" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 2a6 6 0 00-6 6c0 1.887-.454 3.665-1.257 5.234a.75.75 0 00.515 1.076 32.91 32.91 0 003.256.508 3.5 3.5 0 006.972 0 32.903 32.903 0 003.256-.508.75.75 0 00.515-1.076A11.448 11.448 0 0116 8a6 6 0 00-6-6zM8.05 14.943a33.54 33.54 0 003.9 0 2 2 0 01-3.9 0z" clipRule="evenodd" />
+          </svg>
+          <span className="text-sm font-medium text-slate-200">Enviar recordatorio de gestión</span>
+          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300 tabular-nums">
+            {diasTotales}d abierto · {diasEnEtapa}d en etapa
+          </span>
+        </span>
+        <svg
+          className={cn('h-3 w-3 text-slate-400 transition-transform', open && 'rotate-90')}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.06 10 7.23 6.29a.75.75 0 111.04-1.08l4.39 4.25a.75.75 0 010 1.08l-4.39 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="border-t border-white/[0.06] p-3 space-y-3 slide-in">
+          <p className="text-[11px] text-slate-400">
+            Envía un correo a Pacífico pidiendo que se gestione{' '}
+            {siniestro.tipo === 'deducible' ? 'el cobro del deducible' : 'el pago'}, indicando los
+            días hábiles acumulados.
+          </p>
+          <div className="rounded-md bg-white/[0.02] border border-white/[0.05] divide-y divide-white/[0.04] text-xs">
+            <ModalRow label="Para">
+              <ModalChipList items={contenido.to} />
+            </ModalRow>
+            <ModalRow label="CC">
+              <ModalChipList items={contenido.cc} />
+            </ModalRow>
+            <ModalRow label="Asunto">
+              <span className="text-slate-200">{contenido.subject}</span>
+            </ModalRow>
+            <ModalRow label="Cuerpo">
+              <pre className="whitespace-pre-wrap text-slate-300 text-[11px] font-sans leading-relaxed max-h-40 overflow-y-auto">
+                {contenido.body}
+              </pre>
+            </ModalRow>
+          </div>
+          <button
+            onClick={enviar}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-500/50 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-500/25 transition"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M2.94 6.412A2 2 0 002 8.108V16a2 2 0 002 2h12a2 2 0 002-2V8.108a2 2 0 00-.94-1.696l-6-3.75a2 2 0 00-2.12 0l-6 3.75z" />
+            </svg>
+            Abrir {PROVIDER_LABEL_MODAL[provider]} y enviar recordatorio
           </button>
         </div>
       )}

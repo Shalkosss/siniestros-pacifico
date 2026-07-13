@@ -4,7 +4,23 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ---
 
-## v7.1 — Excel en el Drive (actual)
+## v8 — Proceso reducido + Pago en cuenta + Beneficiarios + Sugerencias (actual)
+
+**Migración requerida:** `supabase/migration_v8.sql` (columnas `es_pago_cuenta`, `beneficiarios` y tabla `sugerencias`; el traslado de "Actividad creada" ya se aplicó vía REST)
+
+### Cambios de flujo
+- **Se eliminó la etapa "Actividad creada"** en todos los workflows ([`lib/workflows.ts`](lib/workflows.ts)); las tarjetas que estaban allí se trasladaron a "Solicitud recibida". En deducibles, "Solicitud recibida" queda a cargo de Rosita.
+
+### Nuevo
+- **Pago en cuenta bancaria** (pagos y reembolsos): sub-opción en el formulario que exige adjuntar la ficha de matrícula (PDF/Word); excluyente con cheque. Distintivo en el kanban: ícono de banco + anillo teal en la tarjeta y bloque informativo en el modal.
+- **Beneficiarios múltiples** (pagos y reembolsos): opción para pagar a 2+ personas (nombre + DNI c/u), guardados en `beneficiarios` (jsonb); el primero se refleja en los campos clásicos. Se listan en el correo de notificación y en el modal (con censura para abogados).
+- **Buzón de sugerencias** ([`SugerenciasBox.tsx`](components/SugerenciasBox.tsx)): botón en el header; cualquier usuario deja sugerencias y el admin ve la lista y las marca como leídas.
+- **Aviso de gestión al mover** ([`KanbanBoard.tsx`](components/KanbanBoard.tsx)): tras mover una tarjeta, Pacífico ve un toast opcional para avisar por correo al abogado solicitante que su caso cambió de etapa.
+- **Recordatorio de gestión** ([`SiniestroModal.tsx`](components/SiniestroModal.tsx)): abogados y admin pueden enviar un correo a Pacífico pidiendo gestionar el pago/deducible, con días hábiles totales y días en la etapa actual.
+
+---
+
+## v7.1 — Excel en el Drive
 
 ### Nuevo
 - **Importar Excel al Drive** ([`lib/driveExcel.ts`](lib/driveExcel.ts), [`DriveBoard.tsx`](components/DriveBoard.tsx)):

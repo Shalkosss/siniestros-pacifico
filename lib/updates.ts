@@ -12,6 +12,19 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-07-13',
+    fecha: '2026-07-13',
+    titulo: 'Proceso reducido, pagos en cuenta y buzón de sugerencias',
+    items: [
+      'Se eliminó la etapa "Actividad creada": lo que estaba allí pasó a "Solicitud recibida". El flujo ahora es más corto.',
+      'Pago en cuenta bancaria (pagos y reembolsos): nueva opción al crear el siniestro que exige adjuntar la ficha de matrícula (PDF o Word). En el tablero se distingue con un ícono de banco y un marco verde-azulado.',
+      'Varios beneficiarios (pagos y reembolsos): ahora un siniestro se puede pagar a 2 o más personas, cada una con su nombre y DNI.',
+      'Buzón de sugerencias: nuevo botón en la barra superior para dejar ideas o reportar problemas del sistema.',
+      'Aviso de gestión (Pacífico): al mover una tarjeta de etapa aparece la opción de avisar por correo al abogado que su solicitud fue gestionada.',
+      'Recordatorio de gestión (abogados): desde el detalle del siniestro se puede enviar un correo a Pacífico pidiendo gestionar el pago o deducible, con los días hábiles totales y los días en la etapa actual.',
+    ],
+  },
+  {
     id: '2026-07-10',
     fecha: '2026-07-10',
     titulo: 'Excel en el Drive',

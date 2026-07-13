@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
-import type { Moneda, Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
+import type { Beneficiario, Moneda, Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
 import { cn, validarCodigo } from '@/lib/utils';
 import { getResponsableDeEtapa } from '@/lib/workflows';
 import { puedeCrearSiniestro } from '@/lib/permissions';
@@ -83,6 +83,14 @@ export function SiniestroForm({ abogados }: Props) {
   const [chequeBanco, setChequeBanco] = useState('');
   const [chequePersona, setChequePersona] = useState('');
   const [chequeDni, setChequeDni] = useState('');
+  // Pago en cuenta (pago/reembolso) — exige adjuntar la ficha de matrícula
+  const [esPagoCuenta, setEsPagoCuenta] = useState(false);
+  // Beneficiarios múltiples (pago/reembolso) — opcional
+  const [variosBeneficiarios, setVariosBeneficiarios] = useState(false);
+  const [beneficiarios, setBeneficiarios] = useState<Beneficiario[]>([
+    { nombre: '', dni: '' },
+    { nombre: '', dni: '' },
+  ]);
   const [solicitanteOverride, setSolicitanteOverride] = useState('');
   const [agregarNota, setAgregarNota] = useState(false);
   const [notas, setNotas] = useState('');
@@ -122,6 +130,15 @@ export function SiniestroForm({ abogados }: Props) {
   // Valorización e Info Póliza solo requieren el número de siniestro.
   const soloCodigo = tipo === 'valorizacion' || tipo === 'info_poliza';
   const puedeSerCheque = tipo === 'pago';
+  // Pago en cuenta y beneficiarios múltiples aplican a pagos y reembolsos
+  const puedeSerPagoCuenta = tipo === 'pago' || tipo === 'reembolso';
+  const puedeVariosBeneficiarios = puedeSerPagoCuenta;
+  const usaVarios = puedeVariosBeneficiarios && variosBeneficiarios;
+
+  /** Beneficiarios con nombre y DNI completos */
+  const beneficiariosLlenos = beneficiarios
+    .map((b) => ({ nombre: b.nombre.trim(), dni: b.dni.trim() }))
+    .filter((b) => b.nombre && b.dni);
 
   function validar(): string | null {
     if (!validarCodigo(codigo)) return 'El código debe tener exactamente 8 o 10 dígitos numéricos.';
@@ -130,6 +147,12 @@ export function SiniestroForm({ abogados }: Props) {
     if (tipo === 'deducible') {
       if (!aseguradoNombre.trim()) return 'Indica el nombre del asegurado.';
       if (!correoAsegurado.trim()) return 'Indica el correo del asegurado.';
+    } else if (usaVarios) {
+      if (beneficiariosLlenos.length < 2) return 'Con varios beneficiarios, completa nombre y DNI de al menos 2 personas.';
+      const incompleta = beneficiarios.some(
+        (b) => (b.nombre.trim() && !b.dni.trim()) || (!b.nombre.trim() && b.dni.trim())
+      );
+      if (incompleta) return 'Cada beneficiario necesita nombre y DNI (o quita la fila incompleta).';
     } else {
       if (!aseguradoNombre.trim()) return 'Indica el nombre del tercero.';
       if (!dniTercero.trim()) return 'Indica el DNI del tercero.';
@@ -138,6 +161,9 @@ export function SiniestroForm({ abogados }: Props) {
       if (!chequeBanco.trim()) return 'Indica el nombre del banco del cheque.';
       if (!chequePersona.trim()) return 'Indica la persona que recogerá el cheque.';
       if (!chequeDni.trim()) return 'Indica el DNI de quien recogerá el cheque.';
+    }
+    if (puedeSerPagoCuenta && esPagoCuenta && files.length === 0) {
+      return 'Un pago en cuenta requiere adjuntar la ficha de matrícula (PDF o Word).';
     }
     return null;
   }
@@ -153,6 +179,9 @@ export function SiniestroForm({ abogados }: Props) {
     const responsable = getResponsableDeEtapa(tipo, estadoInicial, { codigo });
 
     const cheque = puedeSerCheque && esCheque;
+    const pagoCuenta = puedeSerPagoCuenta && esPagoCuenta;
+    // Con varios beneficiarios, el primero se refleja en los campos clásicos
+    const bens = !soloCodigo && usaVarios ? beneficiariosLlenos : null;
 
     const payload = {
       codigo,
@@ -161,8 +190,8 @@ export function SiniestroForm({ abogados }: Props) {
       monto: soloCodigo ? null : Number(monto),
       moneda: soloCodigo ? 'PEN' : moneda,
       solicitante,
-      asegurado_nombre: soloCodigo ? null : aseguradoNombre,
-      dni_tercero: !soloCodigo && tipo !== 'deducible' ? dniTercero : null,
+      asegurado_nombre: soloCodigo ? null : bens ? bens[0].nombre : aseguradoNombre,
+      dni_tercero: !soloCodigo && tipo !== 'deducible' ? (bens ? bens[0].dni : dniTercero) : null,
       correo_asegurado: tipo === 'deducible' ? correoAsegurado : null,
       es_cheque: cheque,
       cheque_banco: cheque ? chequeBanco : null,
@@ -170,6 +199,9 @@ export function SiniestroForm({ abogados }: Props) {
       cheque_dni: cheque ? chequeDni : null,
       notas: agregarNota && notas ? notas : null,
       asignado_a: responsable,
+      // v8 — se incluyen solo cuando se usan, para tolerar bases sin la migración
+      ...(pagoCuenta ? { es_pago_cuenta: true } : {}),
+      ...(bens ? { beneficiarios: bens } : {}),
     };
 
     const { data: created, error: insErr } = await supabase
@@ -327,7 +359,7 @@ export function SiniestroForm({ abogados }: Props) {
         </p>
       )}
 
-      {!soloCodigo && (
+      {!soloCodigo && !usaVarios && (
         <>
           <Field label={tipo === 'deducible' ? 'Nombre del asegurado' : 'Nombre del tercero / asegurado'}>
             <input
@@ -365,12 +397,103 @@ export function SiniestroForm({ abogados }: Props) {
         </>
       )}
 
+      {/* Beneficiarios múltiples — opcional en pagos y reembolsos */}
+      {!soloCodigo && puedeVariosBeneficiarios && (
+        <div className="rounded-lg border border-white/[0.06] bg-card/50 p-3 space-y-3">
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <span
+              onClick={() => setVariosBeneficiarios((v) => !v)}
+              className={cn(
+                'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
+                variosBeneficiarios ? 'border-cyan-500 bg-cyan-500' : 'border-slate-600 bg-card'
+              )}
+            >
+              {variosBeneficiarios && (
+                <svg className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                </svg>
+              )}
+            </span>
+            <input type="checkbox" checked={variosBeneficiarios} onChange={(e) => setVariosBeneficiarios(e.target.checked)} className="sr-only" />
+            <span className="text-xs text-slate-300 leading-snug">
+              Este {tipo === 'pago' ? 'pago' : 'reembolso'} tiene <strong className="text-slate-100">varios beneficiarios</strong>
+              <span className="block text-[11px] text-slate-500 mt-0.5">
+                Se puede pagar a 2 o más personas: agrega el nombre y DNI de cada una.
+              </span>
+            </span>
+          </label>
+
+          {usaVarios && (
+            <div className="space-y-2 slide-in">
+              {beneficiarios.map((b, i) => (
+                <div key={i} className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Field label={`Beneficiario ${i + 1} — nombre completo`}>
+                      <input
+                        type="text"
+                        value={b.nombre}
+                        onChange={(e) =>
+                          setBeneficiarios((prev) => prev.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))
+                        }
+                        className={cn(baseInput, focusClass)}
+                      />
+                    </Field>
+                  </div>
+                  <div className="w-36">
+                    <Field label="DNI">
+                      <input
+                        type="text"
+                        value={b.dni}
+                        onChange={(e) =>
+                          setBeneficiarios((prev) => prev.map((x, j) => (j === i ? { ...x, dni: e.target.value } : x)))
+                        }
+                        maxLength={12}
+                        inputMode="numeric"
+                        className={cn(baseInput, focusClass)}
+                      />
+                    </Field>
+                  </div>
+                  {beneficiarios.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => setBeneficiarios((prev) => prev.filter((_, j) => j !== i))}
+                      className="mb-1 grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-red-500/15 hover:text-red-400 transition"
+                      title="Quitar beneficiario"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setBeneficiarios((prev) => [...prev, { nombre: '', dni: '' }])}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-card-hover hover:text-white transition"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
+                </svg>
+                Agregar otro beneficiario
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Cheque — sub-opción dentro de Pago */}
       {puedeSerCheque && (
         <div className="rounded-lg border border-white/[0.06] bg-card/50 p-3 space-y-3">
           <label className="flex items-start gap-2.5 cursor-pointer select-none">
             <span
-              onClick={() => setEsCheque((v) => !v)}
+              onClick={() => {
+                setEsCheque((v) => {
+                  const nuevo = !v;
+                  if (nuevo) setEsPagoCuenta(false); // cheque y cuenta son excluyentes
+                  return nuevo;
+                });
+              }}
               className={cn(
                 'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
                 esCheque ? 'border-cyan-500 bg-cyan-500' : 'border-slate-600 bg-card'
@@ -382,7 +505,12 @@ export function SiniestroForm({ abogados }: Props) {
                 </svg>
               )}
             </span>
-            <input type="checkbox" checked={esCheque} onChange={(e) => setEsCheque(e.target.checked)} className="sr-only" />
+            <input
+              type="checkbox"
+              checked={esCheque}
+              onChange={(e) => { setEsCheque(e.target.checked); if (e.target.checked) setEsPagoCuenta(false); }}
+              className="sr-only"
+            />
             <span className="text-xs text-slate-300 leading-snug">
               Este pago es un <strong className="text-slate-100">cheque</strong>
               <span className="block text-[11px] text-slate-500 mt-0.5">
@@ -423,6 +551,58 @@ export function SiniestroForm({ abogados }: Props) {
                 </Field>
               </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Pago en cuenta — pagos y reembolsos. Exige la ficha de matrícula. */}
+      {puedeSerPagoCuenta && (
+        <div
+          className={cn(
+            'rounded-lg border p-3',
+            esPagoCuenta ? 'border-teal-500/40 bg-teal-500/[0.06]' : 'border-white/[0.06] bg-card/50'
+          )}
+        >
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <span
+              onClick={() => {
+                setEsPagoCuenta((v) => {
+                  const nuevo = !v;
+                  if (nuevo) setEsCheque(false); // cheque y cuenta son excluyentes
+                  return nuevo;
+                });
+              }}
+              className={cn(
+                'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
+                esPagoCuenta ? 'border-teal-500 bg-teal-500' : 'border-slate-600 bg-card'
+              )}
+            >
+              {esPagoCuenta && (
+                <svg className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                </svg>
+              )}
+            </span>
+            <input
+              type="checkbox"
+              checked={esPagoCuenta}
+              onChange={(e) => { setEsPagoCuenta(e.target.checked); if (e.target.checked) setEsCheque(false); }}
+              className="sr-only"
+            />
+            <span className="text-xs text-slate-300 leading-snug">
+              Este {tipo === 'pago' ? 'pago' : 'reembolso'} es en <strong className="text-teal-200">cuenta bancaria</strong>
+              <span className="block text-[11px] text-slate-500 mt-0.5">
+                Obligatorio: adjunta la <strong className="text-slate-300">ficha de matrícula</strong> (PDF o Word) en los archivos de abajo.
+              </span>
+            </span>
+          </label>
+          {esPagoCuenta && files.length === 0 && (
+            <p className="mt-2 text-[11px] text-amber-300/90 flex items-center gap-1.5">
+              <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+              </svg>
+              Falta adjuntar la ficha de matrícula.
+            </p>
           )}
         </div>
       )}
@@ -480,7 +660,11 @@ export function SiniestroForm({ abogados }: Props) {
 
       {/* PDFs */}
       <div>
-        <Label>PDFs adjuntos (opcional)</Label>
+        <Label>
+          {puedeSerPagoCuenta && esPagoCuenta
+            ? 'Adjuntos — incluye la ficha de matrícula (obligatorio)'
+            : 'PDFs adjuntos (opcional)'}
+        </Label>
         <div className="flex items-center gap-3">
           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-card-hover hover:text-white transition">
             <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -489,7 +673,7 @@ export function SiniestroForm({ abogados }: Props) {
             Elegir archivos
             <input
               type="file"
-              accept="application/pdf"
+              accept="application/pdf,.doc,.docx"
               multiple
               onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
               className="hidden"

@@ -43,6 +43,26 @@ export interface Siniestro {
   // v6 — ajuste manual del conteo de días (lo fija Pacífico)
   dias_ajuste: number | null;
   dias_ajuste_fecha: string | null;
+  // v8 — pago en cuenta (exige adjuntar la ficha de matrícula) y
+  // beneficiarios múltiples (opcional; el primero se refleja en asegurado_nombre/dni_tercero)
+  es_pago_cuenta: boolean | null;
+  beneficiarios: Beneficiario[] | null;
+}
+
+/** v8 — beneficiario de un pago/reembolso (cuando hay más de uno) */
+export interface Beneficiario {
+  nombre: string;
+  dni: string;
+}
+
+/** v8 — buzón de sugerencias */
+export interface Sugerencia {
+  id: string;
+  autor: string;
+  rol: string | null;
+  texto: string;
+  leida: boolean;
+  created_at: string;
 }
 
 export interface SiniestroMovimiento {

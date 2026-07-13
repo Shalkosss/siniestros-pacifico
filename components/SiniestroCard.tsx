@@ -60,6 +60,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         className={cn(
           'card-base rounded-lg border-l-[3px] overflow-hidden',
           borderByTipo[siniestro.tipo],
+          siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
           draggable && 'cursor-grab active:cursor-grabbing',
           isDragging && 'dragging'
         )}
@@ -68,11 +69,12 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           onClick={onClick}
           {...dragProps}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-          title={`${siniestro.codigo} · ${nombreMostrado} · ${diasAbierto}d abierto${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
+          title={`${siniestro.codigo} · ${nombreMostrado} · ${diasAbierto}d abierto${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
         >
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1">
             {siniestro.codigo}
           </span>
+          {siniestro.es_pago_cuenta && <BankDot />}
           {siniestro.correo_enviado && <MailDot />}
           <DayBadge dias={diasAbierto} urgencia={urgencia} />
         </button>
@@ -87,6 +89,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
       className={cn(
         'card-base rounded-lg border-l-[3px] overflow-hidden',
         borderByTipo[siniestro.tipo],
+        siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
         draggable && 'cursor-grab active:cursor-grabbing',
         isDragging && 'dragging'
       )}
@@ -95,6 +98,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         <div className="flex items-start justify-between gap-2">
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex items-center gap-1.5">
             {siniestro.codigo}
+            {siniestro.es_pago_cuenta && <BankDot />}
             {siniestro.correo_enviado && <MailDot />}
           </span>
           <DayBadge dias={diasAbierto} urgencia={urgencia} />
@@ -106,6 +110,15 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           )}
           {siniestro.monto != null && (
             <div className="text-[13px] font-semibold text-slate-100">{formatMoneda(siniestro.monto, siniestro.moneda)}</div>
+          )}
+          {siniestro.es_pago_cuenta && (
+            <div className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-teal-500/15 text-teal-300 mr-1">
+              <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10 2L2 7h16l-8-5z" />
+                <path d="M4 8v6h2V8H4zm5 0v6h2V8H9zm5 0v6h2V8h-2zM2 16h16v2H2v-2z" />
+              </svg>
+              Pago en cuenta
+            </div>
           )}
           {siniestro.tipo === 'pago' && siniestro.deducible_pagado != null && (
             <div
@@ -142,6 +155,21 @@ function DayBadge({ dias, urgencia }: { dias: number; urgencia: NivelUrgencia })
     >
       <span className="font-semibold">{dias}</span>
       <span className="opacity-70">d</span>
+    </span>
+  );
+}
+
+/** Indicador de pago en cuenta bancaria (ícono de banco teal) */
+function BankDot() {
+  return (
+    <span
+      className="inline-grid h-4 w-4 place-items-center rounded-sm text-teal-300"
+      title="Pago en cuenta bancaria (ficha de matrícula adjunta)"
+    >
+      <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M10 2L2 7h16l-8-5z" />
+        <path d="M4 8v6h2V8H4zm5 0v6h2V8H9zm5 0v6h2V8h-2zM2 16h16v2H2v-2z" />
+      </svg>
     </span>
   );
 }

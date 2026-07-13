@@ -170,12 +170,21 @@ export function buildCuerpo(s: Siniestro): string {
       .join('\n');
   }
 
+  const variosBeneficiarios = (s.beneficiarios?.length ?? 0) > 1;
+
   return [
-    `Actividad de ${tipoLabel}${s.es_cheque ? ' (CHEQUE)' : ''}`,
+    `Actividad de ${tipoLabel}${s.es_cheque ? ' (CHEQUE)' : ''}${s.es_pago_cuenta ? ' (PAGO EN CUENTA)' : ''}`,
     '',
     `Código de siniestro: ${s.codigo}`,
-    `Nombre del beneficiario: ${s.asegurado_nombre ?? '—'}`,
-    `DNI: ${s.dni_tercero ?? '—'}`,
+    ...(variosBeneficiarios
+      ? [
+          `Beneficiarios (${s.beneficiarios!.length}):`,
+          ...s.beneficiarios!.map((b, i) => `  ${i + 1}. ${b.nombre} — DNI ${b.dni}`),
+        ]
+      : [
+          `Nombre del beneficiario: ${s.asegurado_nombre ?? '—'}`,
+          `DNI: ${s.dni_tercero ?? '—'}`,
+        ]),
     `Monto: ${formatMoneda(s.monto, s.moneda)}`,
     `Solicitante: ${s.solicitante}`,
     ...(s.tipo === 'pago'
@@ -197,6 +206,9 @@ export function buildCuerpo(s: Siniestro): string {
           `· Persona a recoger: ${s.cheque_persona ?? '—'}`,
           `· DNI de quien recoge: ${s.cheque_dni ?? '—'}`,
         ]
+      : []),
+    ...(s.es_pago_cuenta
+      ? ['', 'Pago en cuenta: la ficha de matrícula va adjunta en los PDFs.']
       : []),
     '',
     s.notas ? `Notas: ${s.notas}` : '',
@@ -268,4 +280,107 @@ export function buildEmailUrl(
   if (provider === 'yahoo') return buildYahooUrl(s, remitente);
   if (provider === 'outlook') return buildOutlookUrl(s, remitente);
   return buildGmailUrl(s, remitente);
+}
+
+/* ---------------- Correos genéricos (aviso de gestión / recordatorio) ---------------- */
+
+export interface EmailContenido {
+  to: string[];
+  cc: string[];
+  subject: string;
+  body: string;
+}
+
+/** URL de compose para cualquier contenido, según el proveedor elegido. */
+export function buildComposeUrl(provider: EmailProvider, c: EmailContenido): string {
+  if (provider === 'outlook') {
+    const params = new URLSearchParams({
+      path: '/mail/action/compose',
+      to: c.to.join(','),
+      subject: c.subject,
+      body: c.body,
+    });
+    if (c.cc.length > 0) params.set('cc', c.cc.join(','));
+    return `https://outlook.office.com/mail/deeplink/compose?${params.toString()}`;
+  }
+  if (provider === 'yahoo') {
+    const params = new URLSearchParams({ to: c.to.join(','), subject: c.subject, body: c.body });
+    if (c.cc.length > 0) params.set('cc', c.cc.join(','));
+    return `https://compose.mail.yahoo.com/?${params.toString()}`;
+  }
+  const params = new URLSearchParams({
+    view: 'cm',
+    fs: '1',
+    to: c.to.join(','),
+    su: c.subject,
+    body: c.body,
+  });
+  if (c.cc.length > 0) params.set('cc', c.cc.join(','));
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
+/**
+ * Aviso de gestión (opcional, para Pacífico): al mover una tarjeta de etapa se
+ * puede avisar por correo al abogado solicitante que su caso avanzó.
+ */
+export function buildEmailGestion(
+  s: Pick<Siniestro, 'tipo' | 'codigo' | 'solicitante'>,
+  etapaAnterior: string,
+  etapaNueva: string,
+  movidoPor: string,
+  emailSolicitante: string | null
+): EmailContenido {
+  const prefix = TIPO_PREFIJO[s.tipo] ?? 'SINIESTRO';
+  return {
+    to: emailSolicitante ? [emailSolicitante] : [],
+    cc: [],
+    subject: `[${prefix}] Siniestro ${s.codigo} — gestionado: ahora en "${etapaNueva}"`,
+    body: [
+      `Estimado(a),`,
+      '',
+      `Le informamos que su solicitud del siniestro ${s.codigo} fue gestionada y cambió de etapa:`,
+      '',
+      `· Etapa anterior: ${etapaAnterior}`,
+      `· Etapa actual: ${etapaNueva}`,
+      `· Gestionado por: ${movidoPor} (Pacífico — Equipo Legal)`,
+      '',
+      `Puede ver el detalle y el historial completo en el tablero de LegalTrack.`,
+      '',
+      `Saludos,`,
+      `Equipo Legal — Pacífico Seguros`,
+    ].join('\n'),
+  };
+}
+
+/**
+ * Recordatorio (para abogados): pide a Pacífico gestionar el pago/deducible,
+ * indicando los días hábiles totales y los días en la etapa actual.
+ */
+export function buildEmailRecordatorio(
+  s: Pick<Siniestro, 'tipo' | 'codigo' | 'estado' | 'solicitante'>,
+  diasTotales: number,
+  diasEnEtapa: number,
+  remitente?: Usuario | null
+): EmailContenido {
+  const { to, cc } = getDestinatarios(s as Pick<Siniestro, 'tipo' | 'codigo'>, remitente);
+  const prefix = TIPO_PREFIJO[s.tipo] ?? 'SINIESTRO';
+  const queGestionar = s.tipo === 'deducible' ? 'el cobro del deducible' : 'el pago';
+  return {
+    to,
+    cc,
+    subject: `[RECORDATORIO] [${prefix}] Siniestro ${s.codigo} — ${diasTotales} días hábiles abierto`,
+    body: [
+      `Estimados,`,
+      '',
+      `Les escribo para recordar la gestión de ${queGestionar} del siniestro ${s.codigo}.`,
+      '',
+      `· Días hábiles desde la solicitud: ${diasTotales}`,
+      `· Días hábiles en la etapa actual ("${s.estado}"): ${diasEnEtapa}`,
+      `· Solicitante: ${s.solicitante}`,
+      '',
+      `Agradecería nos indiquen el estado de la gestión o si falta algún documento de nuestra parte.`,
+      '',
+      `Saludos cordiales.`,
+    ].join('\n'),
+  };
 }

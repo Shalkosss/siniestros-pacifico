@@ -23,6 +23,7 @@ import { useUser } from './UserContext';
 import { puedeMover } from '@/lib/permissions';
 import { aplicarScope, scopeAmplio, scopeDefault, scopesDisponibles, type ScopeMode } from '@/lib/scope';
 import { aplicarVistaPredeterminada, tieneVistaPredeterminada } from '@/lib/vistas';
+import { buildComposeUrl, buildEmailGestion, type EmailProvider } from '@/lib/email';
 
 interface Props {
   /** Si true, se cargan también los siniestros cerrados (histórico). Default false (solo activos + cierres recientes). */
@@ -91,6 +92,12 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   // Vista predeterminada (Jack/Rosa/Christian): true = mi vista, false = todo Pacífico
   const [vistaPropia, setVistaPropia] = useState(true);
+  // Tras mover una tarjeta, Pacífico puede avisar por correo al abogado (opcional)
+  const [avisoGestion, setAvisoGestion] = useState<{
+    siniestro: Siniestro;
+    etapaAnterior: string;
+    etapaNueva: string;
+  } | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -279,6 +286,9 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
         siniestro_id: siniestro.id,
       });
     }
+
+    // Ofrece avisar por correo al abogado solicitante (opcional, solo Pacífico)
+    setAvisoGestion({ siniestro, etapaAnterior: siniestro.estado, etapaNueva: destEstado });
   }
 
   const siniestroArrastrando = draggingId ? siniestros.find((s) => s.id === draggingId) : null;
@@ -499,6 +509,102 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
           onChanged={() => void cargar()}
         />
       )}
+
+      {avisoGestion && usuario && (usuario.rol === 'admin' || usuario.rol === 'terceros') && (
+        <AvisoGestionToast
+          aviso={avisoGestion}
+          movidoPor={usuario.nombre}
+          emailSolicitante={
+            usuarios.find((u) => u.nombre === avisoGestion.siniestro.solicitante)?.email ?? null
+          }
+          onClose={() => setAvisoGestion(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Toast: avisar por correo tras mover una tarjeta ---------------- */
+
+const EMAIL_PROVIDER_KEY = 'pacifico:email-provider';
+
+function AvisoGestionToast({
+  aviso,
+  movidoPor,
+  emailSolicitante,
+  onClose,
+}: {
+  aviso: { siniestro: Siniestro; etapaAnterior: string; etapaNueva: string };
+  movidoPor: string;
+  emailSolicitante: string | null;
+  onClose: () => void;
+}) {
+  // Se autodescarta a los 20s para no estorbar
+  useEffect(() => {
+    const t = setTimeout(onClose, 20000);
+    return () => clearTimeout(t);
+  }, [aviso, onClose]);
+
+  function enviar() {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(EMAIL_PROVIDER_KEY) : null;
+    const provider: EmailProvider =
+      saved === 'outlook' || saved === 'yahoo' ? saved : 'gmail';
+    const contenido = buildEmailGestion(
+      aviso.siniestro,
+      aviso.etapaAnterior,
+      aviso.etapaNueva,
+      movidoPor,
+      emailSolicitante
+    );
+    window.open(buildComposeUrl(provider, contenido), '_blank', 'noopener');
+    onClose();
+  }
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 w-80 rounded-xl border border-white/10 bg-ink-800 shadow-2xl p-3.5 slide-in">
+      <div className="flex items-start gap-2.5">
+        <svg className="h-4 w-4 shrink-0 text-cyan-300 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+          <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+        </svg>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold text-slate-100">
+            <span className="font-mono">{aviso.siniestro.codigo}</span> movido a "{aviso.etapaNueva}"
+          </div>
+          <p className="mt-0.5 text-[11px] text-slate-400 leading-snug">
+            ¿Avisar por correo a <span className="text-slate-200">{aviso.siniestro.solicitante}</span> que
+            su solicitud fue gestionada?
+            {!emailSolicitante && (
+              <span className="block text-amber-300/80 mt-0.5">
+                (No tiene correo registrado: se abrirá el borrador para que pongas el destinatario.)
+              </span>
+            )}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={enviar}
+              className="inline-flex items-center gap-1 rounded-md border border-cyan-500/50 bg-cyan-500/15 px-2.5 py-1 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/25 transition"
+            >
+              Enviar aviso
+            </button>
+            <button
+              onClick={onClose}
+              className="inline-flex items-center rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition"
+            >
+              Omitir
+            </button>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded p-0.5 text-slate-500 hover:text-white transition"
+          aria-label="Cerrar"
+        >
+          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
