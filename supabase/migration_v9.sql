@@ -11,3 +11,7 @@ alter table public.siniestros add column if not exists reembolso_abogado boolean
 -- 2) Montos por beneficiario: no requiere columna nueva. Cada objeto del
 --    jsonb `beneficiarios` ahora incluye `monto` ({nombre, dni, tipo, monto})
 --    y la columna `monto` del siniestro guarda la SUMA de esos montos.
+
+-- 3) Por si no se corrió la parte 3b de la v8: tipo de documento del
+--    beneficiario principal ('DNI' default/null, o 'CE').
+alter table public.siniestros add column if not exists doc_tipo text;
