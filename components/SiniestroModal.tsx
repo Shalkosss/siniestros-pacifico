@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Moneda, Siniestro, SiniestroMovimiento, Usuario } from '@/lib/types';
+import type { Beneficiario, Moneda, Siniestro, SiniestroMovimiento, TipoDocumento, Usuario } from '@/lib/types';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
 import { Button } from './ui/Button';
 import { Textarea, Input } from './ui/Input';
-import { cn, censurar, colorPorDias, diasDesde, diasEfectivos, diasHabilesDesde, formatFecha, formatMoneda } from '@/lib/utils';
+import { cn, censurar, colorPorDias, diasDesde, diasEfectivos, diasHabilesDesde, formatFecha, formatMoneda, validarCodigo } from '@/lib/utils';
 import {
   debeCensurar,
   puedeArchivar,
@@ -16,7 +16,7 @@ import {
   puedeEditarCampos,
   puedeSubirPDF,
 } from '@/lib/permissions';
-import { esEtapaFinal } from '@/lib/workflows';
+import { esEtapaFinal, getResponsableDeEtapa } from '@/lib/workflows';
 import {
   buildAsunto,
   buildComposeUrl,
@@ -71,16 +71,30 @@ const PencilIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) => (
   </svg>
 );
 
+/** Fila editable de beneficiario (monto como string mientras se escribe) */
+type BenEdit = { nombre: string; dni: string; tipo: TipoDocumento; monto: string };
+
+function toBenEdit(bens: Beneficiario[] | null): BenEdit[] {
+  return (bens ?? []).map((b) => ({
+    nombre: b.nombre,
+    dni: b.dni,
+    tipo: b.tipo ?? 'DNI',
+    monto: b.monto != null ? String(b.monto) : '',
+  }));
+}
+
 export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: Props) {
   const { usuario } = useUser();
   const router = useRouter();
   const [editMode, setEditMode] = useState(false);
+  const [codigo, setCodigo] = useState(siniestro.codigo);
   const [notas, setNotas] = useState(siniestro.notas ?? '');
   const [monto, setMonto] = useState<string>(siniestro.monto?.toString() ?? '');
   const [moneda, setMoneda] = useState<Moneda>(siniestro.moneda ?? 'PEN');
   const [aseguradoNombre, setAseguradoNombre] = useState(siniestro.asegurado_nombre ?? '');
   const [dniTercero, setDniTercero] = useState(siniestro.dni_tercero ?? '');
   const [correoAsegurado, setCorreoAsegurado] = useState(siniestro.correo_asegurado ?? '');
+  const [bensEdit, setBensEdit] = useState<BenEdit[]>(toBenEdit(siniestro.beneficiarios));
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
   const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
@@ -89,12 +103,14 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    setCodigo(siniestro.codigo);
     setNotas(siniestro.notas ?? '');
     setMonto(siniestro.monto?.toString() ?? '');
     setMoneda(siniestro.moneda ?? 'PEN');
     setAseguradoNombre(siniestro.asegurado_nombre ?? '');
     setDniTercero(siniestro.dni_tercero ?? '');
     setCorreoAsegurado(siniestro.correo_asegurado ?? '');
+    setBensEdit(toBenEdit(siniestro.beneficiarios));
     setEditMode(false);
     setConfirmandoBorrado(false);
     setConfirmandoArchivar(false);
@@ -126,21 +142,72 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   })();
   const colorEtapa = colorPorDias(diasEnEtapaActual);
 
+  const esVariosBens = (siniestro.beneficiarios?.length ?? 0) > 1;
+  const esReembolsoAbogado = !!siniestro.reembolso_abogado;
+
   async function guardarCampos() {
     if (!canEdit) return;
-    setGuardando(true);
+    const codigoNuevo = codigo.trim();
+    if (!validarCodigo(codigoNuevo)) {
+      alert('El código debe tener exactamente 8 o 10 dígitos numéricos.');
+      return;
+    }
+
     const updates: Partial<Siniestro> = {
       notas: notas || null,
-      monto: monto ? Number(monto) : null,
       moneda,
-      asegurado_nombre: aseguradoNombre || null,
     };
-    if (siniestro.tipo !== 'deducible') updates.dni_tercero = dniTercero || null;
-    else updates.correo_asegurado = correoAsegurado || null;
 
+    if (esVariosBens) {
+      const bens = bensEdit
+        .map((b) => ({ nombre: b.nombre.trim(), dni: b.dni.trim(), tipo: b.tipo, monto: Number(b.monto) || 0 }))
+        .filter((b) => b.nombre && (b.dni || esReembolsoAbogado));
+      if (bens.length < 2) {
+        alert('Con varios beneficiarios debe haber al menos 2 filas completas.');
+        return;
+      }
+      const conMonto = bens.filter((b) => b.monto > 0).length;
+      if (conMonto > 0 && conMonto < bens.length) {
+        alert('Completa el monto de todos los beneficiarios (o deja todos vacíos para no cambiar el total).');
+        return;
+      }
+      // Si todos tienen monto, el total del siniestro es la suma. Si ninguno lo
+      // tiene (siniestros antiguos), el total se mantiene tal cual.
+      updates.beneficiarios = conMonto === bens.length
+        ? bens
+        : bens.map(({ monto: _m, ...rest }) => rest);
+      if (conMonto === bens.length) {
+        updates.monto = bens.reduce((acc, b) => acc + b.monto, 0);
+      }
+      updates.asegurado_nombre = bens[0].nombre;
+      if (siniestro.tipo !== 'deducible') updates.dni_tercero = bens[0].dni || null;
+    } else {
+      updates.monto = monto ? Number(monto) : null;
+      updates.asegurado_nombre = aseguradoNombre || null;
+      if (siniestro.tipo !== 'deducible') updates.dni_tercero = dniTercero || null;
+      else updates.correo_asegurado = correoAsegurado || null;
+    }
+
+    const codigoCambiado = codigoNuevo !== siniestro.codigo;
+    if (codigoCambiado) {
+      updates.codigo = codigoNuevo;
+      // El responsable de la etapa depende de los dígitos (8 → Christian, 10 → Jack)
+      updates.asignado_a = getResponsableDeEtapa(siniestro.tipo, siniestro.estado, { codigo: codigoNuevo });
+    }
+
+    setGuardando(true);
     const { error } = await supabase.from('siniestros').update(updates).eq('id', siniestro.id);
+    if (error) { setGuardando(false); alert('Error: ' + error.message); return; }
+    if (codigoCambiado) {
+      await supabase.from('siniestro_movimientos').insert({
+        siniestro_id: siniestro.id,
+        estado_anterior: siniestro.estado,
+        estado_nuevo: siniestro.estado,
+        movido_por: usuario?.nombre ?? 'sistema',
+        notas: `Código corregido: ${siniestro.codigo} → ${codigoNuevo}`,
+      });
+    }
     setGuardando(false);
-    if (error) { alert('Error: ' + error.message); return; }
     setEditMode(false);
     onChanged();
   }
@@ -283,6 +350,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
 
           <div className={cn('text-[10px] font-semibold uppercase tracking-[0.16em]', accentTextByTipo[siniestro.tipo])}>
             {tipoLabel[siniestro.tipo]}
+            {siniestro.reembolso_abogado ? ' · a abogado' : ''}
             {isArchivado && (
               <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[9px] text-slate-300 normal-case tracking-normal">
                 Archivado
@@ -342,7 +410,21 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
               )}
               {editMode && (
                 <div className="flex gap-1.5">
-                  <Button variant="outline" size="sm" onClick={() => { setEditMode(false); setNotas(siniestro.notas ?? ''); }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditMode(false);
+                      setCodigo(siniestro.codigo);
+                      setNotas(siniestro.notas ?? '');
+                      setMonto(siniestro.monto?.toString() ?? '');
+                      setMoneda(siniestro.moneda ?? 'PEN');
+                      setAseguradoNombre(siniestro.asegurado_nombre ?? '');
+                      setDniTercero(siniestro.dni_tercero ?? '');
+                      setCorreoAsegurado(siniestro.correo_asegurado ?? '');
+                      setBensEdit(toBenEdit(siniestro.beneficiarios));
+                    }}
+                  >
                     Cancelar
                   </Button>
                   <Button size="sm" onClick={guardarCampos} disabled={guardando}>
@@ -355,13 +437,26 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
             {editMode ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    label="Monto"
-                    type="number"
-                    step="0.01"
-                    value={monto}
-                    onChange={(e) => setMonto(e.target.value)}
-                  />
+                  <div className="col-span-2">
+                    <Input
+                      label="Número de siniestro"
+                      value={codigo}
+                      onChange={(e) => setCodigo(e.target.value.replace(/\D/g, ''))}
+                      maxLength={10}
+                      inputMode="numeric"
+                      className="font-mono tabular-nums"
+                      hint="8 o 10 dígitos. Al cambiarlo se reasigna el responsable y queda registrado en el historial."
+                    />
+                  </div>
+                  {!esVariosBens && (
+                    <Input
+                      label="Monto"
+                      type="number"
+                      step="0.01"
+                      value={monto}
+                      onChange={(e) => setMonto(e.target.value)}
+                    />
+                  )}
                   <div>
                     <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1.5">Moneda</label>
                     <div className="inline-flex rounded-lg bg-white/[0.04] border border-white/[0.06] p-1">
@@ -369,31 +464,118 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                       <MonedaPill active={moneda === 'USD'} onClick={() => setMoneda('USD')}>$ Dólares</MonedaPill>
                     </div>
                   </div>
-                  {!censura && (
+                  {(!censura || esReembolsoAbogado) && !esVariosBens && (
                     <>
                       <Input
-                        label="Asegurado / tercero"
+                        label={esReembolsoAbogado ? 'Abogado' : 'Asegurado / tercero'}
                         value={aseguradoNombre}
                         onChange={(e) => setAseguradoNombre(e.target.value)}
                       />
-                      {siniestro.tipo !== 'deducible' ? (
-                        <Input label="DNI" value={dniTercero} onChange={(e) => setDniTercero(e.target.value)} />
-                      ) : (
+                      {siniestro.tipo === 'deducible' ? (
                         <Input label="Correo" type="email" value={correoAsegurado} onChange={(e) => setCorreoAsegurado(e.target.value)} />
+                      ) : esReembolsoAbogado ? null : (
+                        <Input
+                          label={siniestro.doc_tipo === 'CE' ? 'CE' : 'DNI'}
+                          value={dniTercero}
+                          onChange={(e) => setDniTercero(e.target.value)}
+                        />
                       )}
                     </>
                   )}
                 </div>
+
+                {/* Beneficiarios múltiples — nombre, documento y monto por persona */}
+                {esVariosBens && (!censura || esReembolsoAbogado) && (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                      Beneficiarios (monto por persona)
+                    </div>
+                    {bensEdit.map((b, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          value={b.nombre}
+                          onChange={(e) =>
+                            setBensEdit((prev) => prev.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))
+                          }
+                          placeholder="Nombre completo"
+                          className="flex-1 min-w-0 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-white/25"
+                        />
+                        {!esReembolsoAbogado && (
+                          <input
+                            value={b.dni}
+                            onChange={(e) =>
+                              setBensEdit((prev) => prev.map((x, j) => (j === i ? { ...x, dni: e.target.value } : x)))
+                            }
+                            maxLength={12}
+                            inputMode="numeric"
+                            placeholder={b.tipo}
+                            className="w-24 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-white/25 tabular-nums"
+                          />
+                        )}
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={b.monto}
+                          onChange={(e) =>
+                            setBensEdit((prev) => prev.map((x, j) => (j === i ? { ...x, monto: e.target.value } : x)))
+                          }
+                          placeholder="Monto"
+                          inputMode="decimal"
+                          className="w-24 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-white/25 tabular-nums"
+                        />
+                        {bensEdit.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => setBensEdit((prev) => prev.filter((_, j) => j !== i))}
+                            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-red-500/15 hover:text-red-400 transition"
+                            title="Quitar beneficiario"
+                          >
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                              <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBensEdit((prev) => [...prev, { nombre: '', dni: '', tipo: 'DNI', monto: '' }])}
+                        className="text-[11px] font-medium text-slate-400 hover:text-white transition"
+                      >
+                        + Agregar beneficiario
+                      </button>
+                      <span className="text-[11px] text-slate-400">
+                        Total:{' '}
+                        <strong className="text-slate-200 tabular-nums">
+                          {formatMoneda(bensEdit.reduce((acc, b) => acc + (Number(b.monto) || 0), 0), moneda)}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <Textarea label="Notas" value={notas} onChange={(e) => setNotas(e.target.value)} rows={3} />
               </div>
             ) : (
               <div className="rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5">
-                <DataLine label="Monto" value={formatMoneda(siniestro.monto, siniestro.moneda)} highlight />
-                <DataLine label="Asegurado / tercero" value={censurar(siniestro.asegurado_nombre, censura)} />
-                {siniestro.tipo !== 'deducible' ? (
-                  <DataLine label="DNI" value={censurar(siniestro.dni_tercero, censura)} />
-                ) : (
+                <DataLine
+                  label={esVariosBens ? 'Monto total' : 'Monto'}
+                  value={formatMoneda(siniestro.monto, siniestro.moneda)}
+                  highlight
+                />
+                <DataLine
+                  label={esReembolsoAbogado ? 'Abogado' : 'Asegurado / tercero'}
+                  value={censurar(siniestro.asegurado_nombre, censura && !esReembolsoAbogado)}
+                />
+                {siniestro.tipo === 'deducible' ? (
                   <DataLine label="Correo" value={siniestro.correo_asegurado ?? '—'} />
+                ) : esReembolsoAbogado ? null : (
+                  <DataLine
+                    label={siniestro.doc_tipo === 'CE' ? 'CE' : 'DNI'}
+                    value={censurar(siniestro.dni_tercero, censura)}
+                  />
                 )}
                 <DataLine label="Solicitante" value={siniestro.solicitante} />
                 {siniestro.notas && <DataLine label="Notas" value={siniestro.notas} multiline />}
@@ -414,8 +596,8 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
               </div>
             )}
 
-            {/* Beneficiarios múltiples */}
-            {(siniestro.beneficiarios?.length ?? 0) > 1 && !editMode && (
+            {/* Beneficiarios múltiples — cada uno con su documento y su monto */}
+            {esVariosBens && !editMode && (
               <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5">
                 <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                   Beneficiarios ({siniestro.beneficiarios!.length})
@@ -423,8 +605,13 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                 {siniestro.beneficiarios!.map((b, i) => (
                   <DataLine
                     key={i}
-                    label={`${i + 1}. ${censurar(b.nombre, censura)}`}
-                    value={`DNI ${censurar(b.dni, censura)}`}
+                    label={`${i + 1}. ${censurar(b.nombre, censura && !esReembolsoAbogado)}`}
+                    value={[
+                      b.dni ? `${b.tipo ?? 'DNI'} ${censurar(b.dni, censura)}` : null,
+                      b.monto != null ? formatMoneda(b.monto, siniestro.moneda) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || '—'}
                   />
                 ))}
               </div>

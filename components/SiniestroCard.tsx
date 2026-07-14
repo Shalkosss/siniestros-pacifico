@@ -38,7 +38,8 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
   const censura = debeCensurar(usuario);
   const diasAbierto = useMemo(() => diasEfectivos(siniestro), [siniestro]);
   const urgencia = useMemo(() => colorPorDias(diasAbierto), [diasAbierto]);
-  const nombreMostrado = censurar(siniestro.asegurado_nombre, censura);
+  // El nombre del abogado (reembolso a abogado) no es dato personal de terceros: no se censura
+  const nombreMostrado = censurar(siniestro.asegurado_nombre, censura && !siniestro.reembolso_abogado);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: siniestro.id,

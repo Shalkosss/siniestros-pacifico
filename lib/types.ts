@@ -47,12 +47,24 @@ export interface Siniestro {
   // beneficiarios múltiples (opcional; el primero se refleja en asegurado_nombre/dni_tercero)
   es_pago_cuenta: boolean | null;
   beneficiarios: Beneficiario[] | null;
+  // v8.1 — tipo de documento del beneficiario principal: 'DNI' (default) o 'CE'
+  doc_tipo: TipoDocumento | null;
+  // v9 — reembolso a abogado (solo tipo 'reembolso'): asegurado_nombre guarda el
+  // nombre del abogado y no se pide documento
+  reembolso_abogado: boolean | null;
 }
+
+/** v8.1 — tipo de documento de identidad */
+export type TipoDocumento = 'DNI' | 'CE';
 
 /** v8 — beneficiario de un pago/reembolso (cuando hay más de uno) */
 export interface Beneficiario {
   nombre: string;
   dni: string;
+  /** v8.1 — 'DNI' (default) o 'CE' (carné de extranjería) */
+  tipo?: TipoDocumento;
+  /** v9 — monto individual del beneficiario; el `monto` del siniestro es la suma */
+  monto?: number | null;
 }
 
 /** v8 — buzón de sugerencias */

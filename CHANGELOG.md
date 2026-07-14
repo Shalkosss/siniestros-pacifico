@@ -4,7 +4,21 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ---
 
-## v8 — Proceso reducido + Pago en cuenta + Beneficiarios + Sugerencias (actual)
+## v9 — Montos por beneficiario + Código editable + Reembolso a abogado (actual)
+
+**Migración requerida:** `supabase/migration_v9.sql` (columna `reembolso_abogado`; los montos por beneficiario viven dentro del jsonb `beneficiarios`)
+
+### Nuevo
+- **Montos por beneficiario** ([`SiniestroForm.tsx`](components/SiniestroForm.tsx), [`SiniestroModal.tsx`](components/SiniestroModal.tsx)): con varios beneficiarios desaparece el campo de monto total — cada fila pide su monto y el total del siniestro es la suma (se guarda en `monto`, así KPIs y tarjetas siguen funcionando). El correo lista cada beneficiario con su monto y el "Monto total". Los montos también son editables por fila en el modal (con agregar/quitar filas).
+- **Número de siniestro editable** ([`SiniestroModal.tsx`](components/SiniestroModal.tsx)): en modo edición del detalle se puede corregir el código (validado a 8/10 dígitos). Al cambiarlo se recalcula el responsable de la etapa (8 → Christian, 10 → Jack) y se registra un movimiento "Código corregido: X → Y" en el historial.
+- **Reembolso a abogado** ([`SiniestroForm.tsx`](components/SiniestroForm.tsx), `reembolso_abogado`): selector Asegurado/Abogado al crear un reembolso. Con abogado se pide solo el nombre (texto libre, sin documento); tarjeta, modal y correo muestran "Abogado"/"Nombre del abogado" y el nombre no se censura (no es dato personal de terceros).
+
+### Cambios
+- **Permisos de edición** ([`lib/permissions.ts`](lib/permissions.ts)): todo el equipo de Pacífico (admin y terceros) puede editar cualquier siniestro; los abogados siguen editando solo los suyos (antes terceros solo editaba los asignados a él).
+
+---
+
+## v8 — Proceso reducido + Pago en cuenta + Beneficiarios + Sugerencias
 
 **Migración requerida:** `supabase/migration_v8.sql` (columnas `es_pago_cuenta`, `beneficiarios` y tabla `sugerencias`; el traslado de "Actividad creada" ya se aplicó vía REST)
 
@@ -13,7 +27,8 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ### Nuevo
 - **Pago en cuenta bancaria** (pagos y reembolsos): sub-opción en el formulario que exige adjuntar la ficha de matrícula (PDF/Word); excluyente con cheque. Distintivo en el kanban: ícono de banco + anillo teal en la tarjeta y bloque informativo en el modal.
-- **Beneficiarios múltiples** (pagos y reembolsos): opción para pagar a 2+ personas (nombre + DNI c/u), guardados en `beneficiarios` (jsonb); el primero se refleja en los campos clásicos. Se listan en el correo de notificación y en el modal (con censura para abogados).
+- **Beneficiarios múltiples** (pagos y reembolsos): opción para pagar a 2+ personas (nombre + documento c/u), guardados en `beneficiarios` (jsonb); el primero se refleja en los campos clásicos. Se listan en el correo de notificación y en el modal (con censura para abogados).
+- **DNI / CE** (pagos y reembolsos): toggle para indicar si el documento del beneficiario es DNI o carné de extranjería, tanto en el campo principal como por cada beneficiario múltiple. Se guarda en `doc_tipo` (null = DNI) y en el `tipo` de cada beneficiario; se refleja en el correo y el modal.
 - **Buzón de sugerencias** ([`SugerenciasBox.tsx`](components/SugerenciasBox.tsx)): botón en el header; cualquier usuario deja sugerencias y el admin ve la lista y las marca como leídas.
 - **Aviso de gestión al mover** ([`KanbanBoard.tsx`](components/KanbanBoard.tsx)): tras mover una tarjeta, Pacífico ve un toast opcional para avisar por correo al abogado solicitante que su caso cambió de etapa.
 - **Recordatorio de gestión** ([`SiniestroModal.tsx`](components/SiniestroModal.tsx)): abogados y admin pueden enviar un correo a Pacífico pidiendo gestionar el pago/deducible, con días hábiles totales y días en la etapa actual.

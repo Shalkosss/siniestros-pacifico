@@ -25,9 +25,10 @@ export function debeCensurar(usuario: Usuario | null): boolean {
 
 export function puedeEditarCampos(usuario: Usuario | null, siniestro: Siniestro): boolean {
   if (!usuario) return false;
-  if (usuario.rol === 'admin') return true;
+  // v9: todo el equipo de Pacífico (admin y terceros) edita cualquier siniestro,
+  // incluido el número de siniestro. Los abogados solo editan los suyos.
+  if (usuario.rol === 'admin' || usuario.rol === 'terceros') return true;
   if (usuario.rol === 'abogado' && siniestro.solicitante === usuario.nombre) return true;
-  if (usuario.rol === 'terceros' && siniestro.asignado_a === usuario.nombre) return true;
   return false;
 }
 

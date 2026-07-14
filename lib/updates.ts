@@ -12,13 +12,24 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-07-14',
+    fecha: '2026-07-14',
+    titulo: 'Montos por beneficiario, código editable y reembolso a abogado',
+    items: [
+      'Montos por beneficiario: cuando un pago o reembolso tiene varios beneficiarios, ya no se ingresa un monto total — cada persona tiene su propio monto y el total se calcula solo (la suma).',
+      'Editar el número de siniestro: ahora se puede corregir el código desde el detalle del siniestro (botón de lápiz), incluso después de estar en el tablero. Los estudios legales solo pueden editar sus propios siniestros; el cambio queda registrado en el historial y se reasigna el responsable si cambia el tipo de código (8 o 10 dígitos).',
+      'Reembolso a abogado: al crear un reembolso ahora se indica si es para el asegurado o para un abogado. Cuando es abogado, se escribe su nombre (sin documento) y así aparece en la tarjeta, el detalle y el correo.',
+    ],
+  },
+  {
     id: '2026-07-13',
     fecha: '2026-07-13',
     titulo: 'Proceso reducido, pagos en cuenta y buzón de sugerencias',
     items: [
       'Se eliminó la etapa "Actividad creada": lo que estaba allí pasó a "Solicitud recibida". El flujo ahora es más corto.',
       'Pago en cuenta bancaria (pagos y reembolsos): nueva opción al crear el siniestro que exige adjuntar la ficha de matrícula (PDF o Word). En el tablero se distingue con un ícono de banco y un marco verde-azulado.',
-      'Varios beneficiarios (pagos y reembolsos): ahora un siniestro se puede pagar a 2 o más personas, cada una con su nombre y DNI.',
+      'Varios beneficiarios (pagos y reembolsos): ahora un siniestro se puede pagar a 2 o más personas, cada una con su nombre y documento.',
+      'DNI o CE: en pagos y reembolsos ahora se indica si el documento del beneficiario es DNI o carné de extranjería (CE), con un selector junto al número.',
       'Buzón de sugerencias: nuevo botón en la barra superior para dejar ideas o reportar problemas del sistema.',
       'Aviso de gestión (Pacífico): al mover una tarjeta de etapa aparece la opción de avisar por correo al abogado que su solicitud fue gestionada.',
       'Recordatorio de gestión (abogados): desde el detalle del siniestro se puede enviar un correo a Pacífico pidiendo gestionar el pago o deducible, con los días hábiles totales y los días en la etapa actual.',

@@ -13,9 +13,12 @@ update public.siniestros
 --    al crear el siniestro; en el tablero se distingue con un ícono de banco.
 alter table public.siniestros add column if not exists es_pago_cuenta boolean not null default false;
 
--- 3) Beneficiarios múltiples (opcional). Array JSON de {nombre, dni}.
+-- 3) Beneficiarios múltiples (opcional). Array JSON de {nombre, dni, tipo}.
 --    El primero se refleja también en asegurado_nombre / dni_tercero.
 alter table public.siniestros add column if not exists beneficiarios jsonb;
+
+-- 3b) Tipo de documento del beneficiario principal: 'DNI' (default, null = DNI) o 'CE'.
+alter table public.siniestros add column if not exists doc_tipo text;
 
 -- 4) Buzón de sugerencias
 create table if not exists public.sugerencias (

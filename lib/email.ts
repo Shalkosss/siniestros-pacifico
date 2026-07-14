@@ -171,21 +171,32 @@ export function buildCuerpo(s: Siniestro): string {
   }
 
   const variosBeneficiarios = (s.beneficiarios?.length ?? 0) > 1;
+  const esReembolsoAbogado = !!s.reembolso_abogado;
 
   return [
-    `Actividad de ${tipoLabel}${s.es_cheque ? ' (CHEQUE)' : ''}${s.es_pago_cuenta ? ' (PAGO EN CUENTA)' : ''}`,
+    `Actividad de ${tipoLabel}${esReembolsoAbogado ? ' (A ABOGADO)' : ''}${s.es_cheque ? ' (CHEQUE)' : ''}${s.es_pago_cuenta ? ' (PAGO EN CUENTA)' : ''}`,
     '',
     `Código de siniestro: ${s.codigo}`,
     ...(variosBeneficiarios
       ? [
-          `Beneficiarios (${s.beneficiarios!.length}):`,
-          ...s.beneficiarios!.map((b, i) => `  ${i + 1}. ${b.nombre} — DNI ${b.dni}`),
+          `${esReembolsoAbogado ? 'Abogados' : 'Beneficiarios'} (${s.beneficiarios!.length}):`,
+          ...s.beneficiarios!.map((b, i) =>
+            [
+              `  ${i + 1}. ${b.nombre}`,
+              b.dni ? `${b.tipo ?? 'DNI'} ${b.dni}` : null,
+              b.monto != null ? formatMoneda(b.monto, s.moneda) : null,
+            ]
+              .filter(Boolean)
+              .join(' — ')
+          ),
         ]
+      : esReembolsoAbogado
+      ? [`Nombre del abogado: ${s.asegurado_nombre ?? '—'}`]
       : [
           `Nombre del beneficiario: ${s.asegurado_nombre ?? '—'}`,
-          `DNI: ${s.dni_tercero ?? '—'}`,
+          `${s.doc_tipo === 'CE' ? 'CE (carné de extranjería)' : 'DNI'}: ${s.dni_tercero ?? '—'}`,
         ]),
-    `Monto: ${formatMoneda(s.monto, s.moneda)}`,
+    `${variosBeneficiarios ? 'Monto total' : 'Monto'}: ${formatMoneda(s.monto, s.moneda)}`,
     `Solicitante: ${s.solicitante}`,
     ...(s.tipo === 'pago'
       ? [

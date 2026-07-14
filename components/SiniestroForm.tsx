@@ -4,8 +4,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
-import type { Beneficiario, Moneda, Siniestro, TipoSiniestro, Usuario } from '@/lib/types';
-import { cn, validarCodigo } from '@/lib/utils';
+import type { Moneda, Siniestro, TipoDocumento, TipoSiniestro, Usuario } from '@/lib/types';
+import { cn, formatMoneda, validarCodigo } from '@/lib/utils';
 import { getResponsableDeEtapa } from '@/lib/workflows';
 import { puedeCrearSiniestro } from '@/lib/permissions';
 import {
@@ -64,6 +64,9 @@ const inputFocusStyle: Record<TipoSiniestro, string> = {
 const baseInput =
   'w-full rounded-lg bg-card border border-white/[0.06] px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 transition focus:outline-none focus:bg-card-hover';
 
+/** Fila de beneficiario en el formulario (monto como string mientras se escribe) */
+type BenForm = { nombre: string; dni: string; tipo: TipoDocumento; monto: string };
+
 interface Props {
   abogados: Usuario[];
 }
@@ -77,6 +80,8 @@ export function SiniestroForm({ abogados }: Props) {
   const [moneda, setMoneda] = useState<Moneda>('PEN');
   const [aseguradoNombre, setAseguradoNombre] = useState('');
   const [dniTercero, setDniTercero] = useState('');
+  // Tipo de documento del tercero: DNI (peruano) o CE (carné de extranjería)
+  const [docTipo, setDocTipo] = useState<TipoDocumento>('DNI');
   const [correoAsegurado, setCorreoAsegurado] = useState('');
   // Cheque (sub-opción dentro de Pago)
   const [esCheque, setEsCheque] = useState(false);
@@ -85,11 +90,13 @@ export function SiniestroForm({ abogados }: Props) {
   const [chequeDni, setChequeDni] = useState('');
   // Pago en cuenta (pago/reembolso) — exige adjuntar la ficha de matrícula
   const [esPagoCuenta, setEsPagoCuenta] = useState(false);
-  // Beneficiarios múltiples (pago/reembolso) — opcional
+  // Reembolso: ¿a quién se reembolsa? asegurado (default) o abogado
+  const [reembolsoA, setReembolsoA] = useState<'asegurado' | 'abogado'>('asegurado');
+  // Beneficiarios múltiples (pago/reembolso) — opcional. El monto es por persona.
   const [variosBeneficiarios, setVariosBeneficiarios] = useState(false);
-  const [beneficiarios, setBeneficiarios] = useState<Beneficiario[]>([
-    { nombre: '', dni: '' },
-    { nombre: '', dni: '' },
+  const [beneficiarios, setBeneficiarios] = useState<BenForm[]>([
+    { nombre: '', dni: '', tipo: 'DNI', monto: '' },
+    { nombre: '', dni: '', tipo: 'DNI', monto: '' },
   ]);
   const [solicitanteOverride, setSolicitanteOverride] = useState('');
   const [agregarNota, setAgregarNota] = useState(false);
@@ -134,28 +141,51 @@ export function SiniestroForm({ abogados }: Props) {
   const puedeSerPagoCuenta = tipo === 'pago' || tipo === 'reembolso';
   const puedeVariosBeneficiarios = puedeSerPagoCuenta;
   const usaVarios = puedeVariosBeneficiarios && variosBeneficiarios;
+  // Reembolso a abogado: solo nombre (texto libre), sin documento
+  const esReembolsoAbogado = tipo === 'reembolso' && reembolsoA === 'abogado';
 
-  /** Beneficiarios con nombre y DNI completos */
+  /** Beneficiarios con datos completos (con reembolso a abogado no se pide documento) */
   const beneficiariosLlenos = beneficiarios
-    .map((b) => ({ nombre: b.nombre.trim(), dni: b.dni.trim() }))
-    .filter((b) => b.nombre && b.dni);
+    .map((b) => ({
+      nombre: b.nombre.trim(),
+      dni: b.dni.trim(),
+      tipo: b.tipo ?? ('DNI' as TipoDocumento),
+      monto: Number(b.monto),
+    }))
+    .filter((b) => b.nombre && (b.dni || esReembolsoAbogado) && b.monto > 0);
+
+  /** Suma de los montos individuales — reemplaza al monto total cuando hay varios */
+  const montoTotalVarios = beneficiariosLlenos.reduce((acc, b) => acc + b.monto, 0);
 
   function validar(): string | null {
     if (!validarCodigo(codigo)) return 'El código debe tener exactamente 8 o 10 dígitos numéricos.';
     if (soloCodigo) return null;
-    if (!monto || isNaN(Number(monto)) || Number(monto) <= 0) return 'Ingresa un monto válido mayor a 0.';
+    if (!usaVarios && (!monto || isNaN(Number(monto)) || Number(monto) <= 0)) return 'Ingresa un monto válido mayor a 0.';
     if (tipo === 'deducible') {
       if (!aseguradoNombre.trim()) return 'Indica el nombre del asegurado.';
       if (!correoAsegurado.trim()) return 'Indica el correo del asegurado.';
     } else if (usaVarios) {
-      if (beneficiariosLlenos.length < 2) return 'Con varios beneficiarios, completa nombre y DNI de al menos 2 personas.';
-      const incompleta = beneficiarios.some(
-        (b) => (b.nombre.trim() && !b.dni.trim()) || (!b.nombre.trim() && b.dni.trim())
-      );
-      if (incompleta) return 'Cada beneficiario necesita nombre y DNI (o quita la fila incompleta).';
+      if (beneficiariosLlenos.length < 2) {
+        return esReembolsoAbogado
+          ? 'Con varios beneficiarios, completa nombre y monto de al menos 2 abogados.'
+          : 'Con varios beneficiarios, completa nombre, DNI y monto de al menos 2 personas.';
+      }
+      const incompleta = beneficiarios.some((b) => {
+        const tieneAlgo = b.nombre.trim() || b.dni.trim() || b.monto.trim();
+        if (!tieneAlgo) return false;
+        const completa = b.nombre.trim() && (b.dni.trim() || esReembolsoAbogado) && Number(b.monto) > 0;
+        return !completa;
+      });
+      if (incompleta) {
+        return esReembolsoAbogado
+          ? 'Cada abogado necesita nombre y un monto mayor a 0 (o quita la fila incompleta).'
+          : 'Cada beneficiario necesita nombre, documento y un monto mayor a 0 (o quita la fila incompleta).';
+      }
+    } else if (esReembolsoAbogado) {
+      if (!aseguradoNombre.trim()) return 'Indica el nombre del abogado.';
     } else {
       if (!aseguradoNombre.trim()) return 'Indica el nombre del tercero.';
-      if (!dniTercero.trim()) return 'Indica el DNI del tercero.';
+      if (!dniTercero.trim()) return `Indica el ${docTipo} del tercero.`;
     }
     if (puedeSerCheque && esCheque) {
       if (!chequeBanco.trim()) return 'Indica el nombre del banco del cheque.';
@@ -187,11 +217,15 @@ export function SiniestroForm({ abogados }: Props) {
       codigo,
       tipo,
       estado: estadoInicial,
-      monto: soloCodigo ? null : Number(monto),
+      // Con varios beneficiarios el monto del siniestro es la suma de los individuales
+      monto: soloCodigo ? null : usaVarios ? montoTotalVarios : Number(monto),
       moneda: soloCodigo ? 'PEN' : moneda,
       solicitante,
       asegurado_nombre: soloCodigo ? null : bens ? bens[0].nombre : aseguradoNombre,
-      dni_tercero: !soloCodigo && tipo !== 'deducible' ? (bens ? bens[0].dni : dniTercero) : null,
+      dni_tercero:
+        !soloCodigo && tipo !== 'deducible' && !esReembolsoAbogado
+          ? (bens ? bens[0].dni || null : dniTercero)
+          : null,
       correo_asegurado: tipo === 'deducible' ? correoAsegurado : null,
       es_cheque: cheque,
       cheque_banco: cheque ? chequeBanco : null,
@@ -202,6 +236,10 @@ export function SiniestroForm({ abogados }: Props) {
       // v8 — se incluyen solo cuando se usan, para tolerar bases sin la migración
       ...(pagoCuenta ? { es_pago_cuenta: true } : {}),
       ...(bens ? { beneficiarios: bens } : {}),
+      // v8.1 — tipo de documento del beneficiario principal (null/ausente = DNI)
+      ...(!esReembolsoAbogado && (bens ? bens[0].tipo : docTipo) === 'CE' ? { doc_tipo: 'CE' } : {}),
+      // v9 — reembolso a abogado
+      ...(esReembolsoAbogado ? { reembolso_abogado: true } : {}),
     };
 
     const { data: created, error: insErr } = await supabase
@@ -329,17 +367,26 @@ export function SiniestroForm({ abogados }: Props) {
           />
         </Field>
         {!soloCodigo && (
-          <Field label="Monto">
+          <Field
+            label={usaVarios ? 'Monto total (suma de beneficiarios)' : 'Monto'}
+            hint={usaVarios ? 'Con varios beneficiarios el monto se indica por persona; aquí se muestra la suma.' : undefined}
+          >
             <div className="flex gap-2">
-              <input
-                type="number"
-                step="0.01"
-                value={monto}
-                onChange={(e) => setMonto(e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
-                className={cn(baseInput, focusClass, 'flex-1')}
-              />
+              {usaVarios ? (
+                <div className={cn(baseInput, 'flex-1 bg-card/50 text-slate-400 tabular-nums select-none')}>
+                  {montoTotalVarios > 0 ? formatMoneda(montoTotalVarios, moneda) : '—'}
+                </div>
+              ) : (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                  className={cn(baseInput, focusClass, 'flex-1')}
+                />
+              )}
               <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1 shrink-0">
                 <ProviderPill active={moneda === 'PEN'} onClick={() => setMoneda('PEN')}>
                   S/ Soles
@@ -359,13 +406,39 @@ export function SiniestroForm({ abogados }: Props) {
         </p>
       )}
 
+      {/* Reembolso: ¿a quién se reembolsa? */}
+      {tipo === 'reembolso' && (
+        <Field
+          label="¿A quién se reembolsa?"
+          hint={esReembolsoAbogado ? 'Se registra el nombre del abogado, sin documento.' : undefined}
+        >
+          <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1">
+            <ProviderPill active={reembolsoA === 'asegurado'} onClick={() => setReembolsoA('asegurado')}>
+              Asegurado
+            </ProviderPill>
+            <ProviderPill active={reembolsoA === 'abogado'} onClick={() => setReembolsoA('abogado')}>
+              Abogado
+            </ProviderPill>
+          </div>
+        </Field>
+      )}
+
       {!soloCodigo && !usaVarios && (
         <>
-          <Field label={tipo === 'deducible' ? 'Nombre del asegurado' : 'Nombre del tercero / asegurado'}>
+          <Field
+            label={
+              tipo === 'deducible'
+                ? 'Nombre del asegurado'
+                : esReembolsoAbogado
+                ? 'Nombre del abogado'
+                : 'Nombre del tercero / asegurado'
+            }
+          >
             <input
               type="text"
               value={aseguradoNombre}
               onChange={(e) => setAseguradoNombre(e.target.value)}
+              placeholder={esReembolsoAbogado ? 'Nombre completo del abogado' : undefined}
               className={cn(baseInput, focusClass)}
             />
           </Field>
@@ -382,16 +455,27 @@ export function SiniestroForm({ abogados }: Props) {
                 className={cn(baseInput, focusClass)}
               />
             </Field>
-          ) : (
-            <Field label="DNI del tercero">
-              <input
-                type="text"
-                value={dniTercero}
-                onChange={(e) => setDniTercero(e.target.value)}
-                maxLength={12}
-                inputMode="numeric"
-                className={cn(baseInput, focusClass)}
-              />
+          ) : esReembolsoAbogado ? null : (
+            <Field label="Documento del tercero">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={dniTercero}
+                  onChange={(e) => setDniTercero(e.target.value)}
+                  maxLength={12}
+                  inputMode="numeric"
+                  placeholder={docTipo === 'DNI' ? 'N° de DNI' : 'N° de carné de extranjería'}
+                  className={cn(baseInput, focusClass, 'flex-1')}
+                />
+                <div className="inline-flex rounded-lg bg-card border border-white/[0.06] p-1 shrink-0">
+                  <ProviderPill active={docTipo === 'DNI'} onClick={() => setDocTipo('DNI')}>
+                    DNI
+                  </ProviderPill>
+                  <ProviderPill active={docTipo === 'CE'} onClick={() => setDocTipo('CE')}>
+                    CE
+                  </ProviderPill>
+                </div>
+              </div>
             </Field>
           )}
         </>
@@ -418,7 +502,9 @@ export function SiniestroForm({ abogados }: Props) {
             <span className="text-xs text-slate-300 leading-snug">
               Este {tipo === 'pago' ? 'pago' : 'reembolso'} tiene <strong className="text-slate-100">varios beneficiarios</strong>
               <span className="block text-[11px] text-slate-500 mt-0.5">
-                Se puede pagar a 2 o más personas: agrega el nombre y DNI de cada una.
+                {esReembolsoAbogado
+                  ? 'Se puede reembolsar a 2 o más abogados: agrega el nombre y el monto de cada uno. El monto total es la suma.'
+                  : 'Se puede pagar a 2 o más personas: agrega el nombre, documento (DNI o CE) y monto de cada una. El monto total es la suma.'}
               </span>
             </span>
           </label>
@@ -426,9 +512,9 @@ export function SiniestroForm({ abogados }: Props) {
           {usaVarios && (
             <div className="space-y-2 slide-in">
               {beneficiarios.map((b, i) => (
-                <div key={i} className="flex items-end gap-2">
-                  <div className="flex-1">
-                    <Field label={`Beneficiario ${i + 1} — nombre completo`}>
+                <div key={i} className="flex items-end gap-2 flex-wrap">
+                  <div className="flex-1 min-w-[180px]">
+                    <Field label={`${esReembolsoAbogado ? 'Abogado' : 'Beneficiario'} ${i + 1} — nombre completo`}>
                       <input
                         type="text"
                         value={b.nombre}
@@ -439,8 +525,32 @@ export function SiniestroForm({ abogados }: Props) {
                       />
                     </Field>
                   </div>
-                  <div className="w-36">
-                    <Field label="DNI">
+                  {!esReembolsoAbogado && (
+                    <div className="w-44">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Documento
+                        </span>
+                        <div className="inline-flex rounded-md bg-card border border-white/[0.06] p-0.5">
+                          {(['DNI', 'CE'] as TipoDocumento[]).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() =>
+                                setBeneficiarios((prev) => prev.map((x, j) => (j === i ? { ...x, tipo: t } : x)))
+                              }
+                              className={cn(
+                                'rounded px-1.5 py-0.5 text-[10px] font-medium transition',
+                                (b.tipo ?? 'DNI') === t
+                                  ? 'bg-white/10 text-white'
+                                  : 'text-slate-400 hover:text-white'
+                              )}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <input
                         type="text"
                         value={b.dni}
@@ -449,7 +559,24 @@ export function SiniestroForm({ abogados }: Props) {
                         }
                         maxLength={12}
                         inputMode="numeric"
+                        placeholder={`N° de ${b.tipo ?? 'DNI'}`}
                         className={cn(baseInput, focusClass)}
+                      />
+                    </div>
+                  )}
+                  <div className="w-32">
+                    <Field label={`Monto (${moneda === 'PEN' ? 'S/' : '$'})`}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={b.monto}
+                        onChange={(e) =>
+                          setBeneficiarios((prev) => prev.map((x, j) => (j === i ? { ...x, monto: e.target.value } : x)))
+                        }
+                        placeholder="0.00"
+                        inputMode="decimal"
+                        className={cn(baseInput, focusClass, 'tabular-nums')}
                       />
                     </Field>
                   </div>
@@ -467,16 +594,21 @@ export function SiniestroForm({ abogados }: Props) {
                   )}
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={() => setBeneficiarios((prev) => [...prev, { nombre: '', dni: '' }])}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-card-hover hover:text-white transition"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
-                </svg>
-                Agregar otro beneficiario
-              </button>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setBeneficiarios((prev) => [...prev, { nombre: '', dni: '', tipo: 'DNI', monto: '' }])}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-card-hover hover:text-white transition"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
+                  </svg>
+                  Agregar otro {esReembolsoAbogado ? 'abogado' : 'beneficiario'}
+                </button>
+                <span className="text-xs text-slate-400">
+                  Total: <strong className="text-slate-100 tabular-nums">{montoTotalVarios > 0 ? formatMoneda(montoTotalVarios, moneda) : '—'}</strong>
+                </span>
+              </div>
             </div>
           )}
         </div>
