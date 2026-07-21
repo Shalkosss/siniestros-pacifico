@@ -22,6 +22,28 @@ interface UserCtx {
 const Ctx = createContext<UserCtx | undefined>(undefined);
 const STORAGE_KEY = 'pacifico:usuario-nombre';
 
+/**
+ * v10 — deja constancia de que el usuario entró hoy (una fila por usuario/día).
+ * Fire-and-forget: si la tabla no existe aún o falla, no bloquea la app.
+ */
+function registrarAcceso(u: Usuario, team: TeamSlug | null) {
+  void supabase
+    .from('usuario_accesos')
+    .upsert(
+      {
+        usuario_nombre: u.nombre,
+        rol: u.rol,
+        estudio: u.estudio,
+        team,
+        fecha: new Date().toISOString().slice(0, 10),
+      },
+      { onConflict: 'usuario_nombre,fecha', ignoreDuplicates: true }
+    )
+    .then(({ error }) => {
+      if (error) console.warn('No se pudo registrar el acceso', error.message);
+    });
+}
+
 export function UserProvider({ team, children }: { team: TeamSlug | null; children: ReactNode }) {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [usuario, setUsuarioState] = useState<Usuario | null>(null);
@@ -48,8 +70,10 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
     if (guardado && team) {
       const elegibles = usuariosDeEquipo(data ?? [], team);
       const found = elegibles.find((u) => u.nombre === guardado);
-      if (found) setUsuarioState(found);
-      else setUsuarioState(null);
+      if (found) {
+        setUsuarioState(found);
+        registrarAcceso(found, team);
+      } else setUsuarioState(null);
     } else {
       setUsuarioState(null);
     }
@@ -60,13 +84,17 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
     void cargarUsuarios();
   }, [cargarUsuarios]);
 
-  const setUsuario = useCallback((u: Usuario | null) => {
-    setUsuarioState(u);
-    if (typeof window !== 'undefined') {
-      if (u) localStorage.setItem(STORAGE_KEY, u.nombre);
-      else localStorage.removeItem(STORAGE_KEY);
-    }
-  }, []);
+  const setUsuario = useCallback(
+    (u: Usuario | null) => {
+      setUsuarioState(u);
+      if (typeof window !== 'undefined') {
+        if (u) localStorage.setItem(STORAGE_KEY, u.nombre);
+        else localStorage.removeItem(STORAGE_KEY);
+      }
+      if (u) registrarAcceso(u, team);
+    },
+    [team]
+  );
 
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' });

@@ -52,6 +52,10 @@ export interface Siniestro {
   // v9 — reembolso a abogado (solo tipo 'reembolso'): asegurado_nombre guarda el
   // nombre del abogado y no se pide documento
   reembolso_abogado: boolean | null;
+  // v10 — nota de pausa de Pacífico (distinta de `notas`). Mientras `pausado`
+  // sea true, el contador de días queda congelado y en el tablero se muestra "—".
+  nota_pausa: string | null;
+  pausado: boolean;
 }
 
 /** v8.1 — tipo de documento de identidad */
@@ -116,6 +120,17 @@ export interface DriveSiniestro {
   // Alertas visuales: null = autodetección por texto; true/false = manual
   flag_fallecido: boolean | null;
   flag_unidad_retenida: boolean | null;
+}
+
+/** v10 — registro de acceso diario (una fila por usuario por día) */
+export interface UsuarioAcceso {
+  id: string;
+  usuario_nombre: string;
+  rol: string | null;
+  estudio: string | null;
+  team: string | null;
+  fecha: string; // YYYY-MM-DD
+  created_at: string;
 }
 
 export interface Notificacion {

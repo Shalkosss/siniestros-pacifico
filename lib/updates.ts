@@ -12,6 +12,18 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-07-21',
+    fecha: '2026-07-21',
+    titulo: 'KPIs de montos, notas de pausa y control de accesos',
+    items: [
+      'KPIs de dinero: nuevos indicadores de monto pagado a terceros, cobrado en deducibles, pendiente de cobro, reembolsado y pago promedio por siniestro. Con gráficos por mes.',
+      'Solicitudes por semana o por mes: separadas por pagos, deducibles y reembolsos, con un botón para alternar entre semana y mes.',
+      'Por estudio y por persona: cuántas solicitudes entran por estudio legal y el monto promedio por estudio y por abogado.',
+      'Nota de pausa (Pacífico): desde el detalle de un siniestro, Pacífico puede pausar el contador de días con una nota (p. ej. "a la espera de un documento"). Mientras esté pausado, en el tablero se muestra "—" con un marco ámbar y el tiempo en pausa no cuenta.',
+      'Control de accesos: los KPIs muestran qué abogados están entrando con su usuario y quiénes no (días activos y último acceso).',
+    ],
+  },
+  {
     id: '2026-07-14',
     fecha: '2026-07-14',
     titulo: 'Montos por beneficiario, código editable y reembolso a abogado',

@@ -205,7 +205,8 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
         const hay =
           s.codigo.includes(q) ||
           (s.asegurado_nombre ?? '').toLowerCase().includes(q) ||
-          (s.notas ?? '').toLowerCase().includes(q);
+          (s.notas ?? '').toLowerCase().includes(q) ||
+          (s.nota_pausa ?? '').toLowerCase().includes(q);
         if (!hay) return false;
       }
       return true;

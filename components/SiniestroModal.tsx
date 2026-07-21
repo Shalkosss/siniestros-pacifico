@@ -7,7 +7,7 @@ import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
 import { Button } from './ui/Button';
 import { Textarea, Input } from './ui/Input';
-import { cn, censurar, colorPorDias, diasDesde, diasEfectivos, diasHabilesDesde, formatFecha, formatMoneda, validarCodigo } from '@/lib/utils';
+import { cn, censurar, colorPorDias, diasDesde, diasEfectivos, diasHabilesDesde, estaPausado, formatFecha, formatMoneda, validarCodigo } from '@/lib/utils';
 import {
   debeCensurar,
   puedeArchivar,
@@ -95,6 +95,8 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const [dniTercero, setDniTercero] = useState(siniestro.dni_tercero ?? '');
   const [correoAsegurado, setCorreoAsegurado] = useState(siniestro.correo_asegurado ?? '');
   const [bensEdit, setBensEdit] = useState<BenEdit[]>(toBenEdit(siniestro.beneficiarios));
+  const [notaPausaInput, setNotaPausaInput] = useState(siniestro.nota_pausa ?? '');
+  const [pausando, setPausando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
   const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
@@ -111,6 +113,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     setDniTercero(siniestro.dni_tercero ?? '');
     setCorreoAsegurado(siniestro.correo_asegurado ?? '');
     setBensEdit(toBenEdit(siniestro.beneficiarios));
+    setNotaPausaInput(siniestro.nota_pausa ?? '');
     setEditMode(false);
     setConfirmandoBorrado(false);
     setConfirmandoArchivar(false);
@@ -135,6 +138,7 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const isArchivado = !!siniestro.archived_at;
   const puedeMoverEnGeneral = usuario?.rol === 'admin' || usuario?.rol === 'terceros';
 
+  const pausado = estaPausado(siniestro);
   const diasAbierto = diasEfectivos(siniestro);
   const diasEnEtapaActual = (() => {
     const ult = [...movimientos].reverse().find((m) => m.estado_nuevo === siniestro.estado);
@@ -294,6 +298,61 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     onChanged();
   }
 
+  // v10 — Nota de pausa: congela el contador (guarda los días actuales en
+  // dias_ajuste) hasta que Pacífico lo reanude. El tiempo en pausa no cuenta.
+  async function pausarContador() {
+    if (!puedeMoverEnGeneral) return;
+    const nota = notaPausaInput.trim();
+    if (!nota) { alert('Escribe una nota para pausar el contador.'); return; }
+    setPausando(true);
+    const congelado = diasEfectivos(siniestro);
+    const { error } = await supabase
+      .from('siniestros')
+      .update({
+        nota_pausa: nota,
+        pausado: true,
+        dias_ajuste: congelado,
+        dias_ajuste_fecha: new Date().toISOString(),
+      })
+      .eq('id', siniestro.id);
+    if (error) { setPausando(false); alert('Error: ' + error.message); return; }
+    await supabase.from('siniestro_movimientos').insert({
+      siniestro_id: siniestro.id,
+      estado_anterior: siniestro.estado,
+      estado_nuevo: siniestro.estado,
+      movido_por: usuario?.nombre ?? 'sistema',
+      notas: `Contador pausado (${congelado}d): ${nota}`,
+    });
+    setPausando(false);
+    onChanged();
+  }
+
+  async function reanudarContador() {
+    if (!puedeMoverEnGeneral) return;
+    setPausando(true);
+    // Se mantiene dias_ajuste (los días congelados) y se reinicia la fecha a hoy,
+    // de modo que el conteo continúa desde el valor congelado.
+    const { error } = await supabase
+      .from('siniestros')
+      .update({
+        pausado: false,
+        nota_pausa: null,
+        dias_ajuste_fecha: new Date().toISOString(),
+      })
+      .eq('id', siniestro.id);
+    if (error) { setPausando(false); alert('Error: ' + error.message); return; }
+    await supabase.from('siniestro_movimientos').insert({
+      siniestro_id: siniestro.id,
+      estado_anterior: siniestro.estado,
+      estado_nuevo: siniestro.estado,
+      movido_por: usuario?.nombre ?? 'sistema',
+      notas: 'Contador reanudado',
+    });
+    setNotaPausaInput('');
+    setPausando(false);
+    onChanged();
+  }
+
   async function archivar() {
     if (!canArchive) return;
     const ts = new Date().toISOString();
@@ -364,8 +423,14 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
           <div className="mt-4 grid grid-cols-3 gap-3">
             <Metric
               label="Tiempo abierto"
-              value={`${diasAbierto}d`}
-              subtitle={isFinal && siniestro.closed_at ? `Cerrado hace ${diasDesde(siniestro.closed_at)}d` : undefined}
+              value={pausado ? '—' : `${diasAbierto}d`}
+              subtitle={
+                pausado
+                  ? `Pausado · ${diasAbierto}d congelados`
+                  : isFinal && siniestro.closed_at
+                  ? `Cerrado hace ${diasDesde(siniestro.closed_at)}d`
+                  : undefined
+              }
             />
             <Metric
               label="En etapa"
@@ -389,6 +454,24 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
         </div>
 
         <div className="space-y-5 px-5 py-5">
+          {/* Banner de pausa — visible para todos cuando el contador está pausado */}
+          {pausado && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-3 py-2.5 flex items-start gap-2.5">
+              <svg className="h-4 w-4 shrink-0 text-amber-300 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
+              </svg>
+              <div className="min-w-0 text-xs">
+                <span className="font-semibold text-amber-200">Contador de días pausado</span>
+                <span className="block text-[11px] text-amber-100/70">
+                  El conteo quedó congelado en {diasAbierto}d por Pacífico.
+                </span>
+                {siniestro.nota_pausa && (
+                  <p className="mt-1 whitespace-pre-wrap text-[11px] text-slate-300">{siniestro.nota_pausa}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {puedeMoverEnGeneral && !isFinal && !isArchivado && (
             <p className="text-[11px] text-slate-500 -mt-1">
               Tip: arrastra la tarjeta entre columnas del tablero para mover de etapa.
@@ -818,6 +901,54 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                   ))}
                 </ol>
               )}
+            </section>
+          )}
+
+          {/* Nota de pausa (pacífico: admin/terceros) — congela el contador de días */}
+          {puedeMoverEnGeneral && (
+            <section
+              className={cn(
+                'rounded-lg border p-3 space-y-2',
+                pausado ? 'border-amber-500/30 bg-amber-500/[0.05]' : 'border-white/10 bg-white/[0.02]'
+              )}
+            >
+              <div className="flex items-center gap-1.5">
+                <svg className="h-3.5 w-3.5 text-amber-300" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
+                </svg>
+                <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                  Nota de pausa
+                </h3>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Pausa el contador de días con una nota (p. ej. “a la espera de documento del abogado”).
+                Mientras esté pausado, en el tablero se muestra “—” y el tiempo no cuenta. Es distinta de
+                las notas normales del siniestro.
+              </p>
+              <Textarea
+                label={pausado ? 'Nota de pausa (activa)' : 'Motivo de la pausa'}
+                value={notaPausaInput}
+                onChange={(e) => setNotaPausaInput(e.target.value)}
+                rows={2}
+                placeholder="¿Por qué se pausa el conteo?"
+                disabled={pausado}
+              />
+              <div className="flex items-center gap-2">
+                {!pausado ? (
+                  <Button size="sm" onClick={pausarContador} disabled={pausando || !notaPausaInput.trim()}>
+                    {pausando ? 'Pausando…' : 'Pausar contador'}
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={reanudarContador} disabled={pausando}>
+                    {pausando ? 'Reanudando…' : 'Reanudar contador'}
+                  </Button>
+                )}
+                {pausado && (
+                  <span className="text-[11px] text-amber-300/80">
+                    Congelado en {diasAbierto}d.
+                  </span>
+                )}
+              </div>
             </section>
           )}
 

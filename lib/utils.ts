@@ -37,15 +37,23 @@ export function diasHabilesDesde(fecha: string | Date): number {
   return diasHabilesEntre(fecha, new Date());
 }
 
+/** v10 — ¿el contador está pausado por Pacífico? */
+export function estaPausado(s: Pick<Siniestro, 'pausado'>): boolean {
+  return !!s.pausado;
+}
+
 /**
  * Días hábiles efectivos que lleva abierto un siniestro.
  * Si Pacífico fijó un ajuste manual (`dias_ajuste`), se toma ese número como base
  * y se le suman los días hábiles transcurridos desde que se fijó.
+ * Si está pausado (`pausado`), el conteo queda congelado en la base: el tiempo en
+ * pausa no cuenta (al pausar se guarda el valor actual en `dias_ajuste`).
  */
 export function diasEfectivos(
-  s: Pick<Siniestro, 'created_at' | 'dias_ajuste' | 'dias_ajuste_fecha'>
+  s: Pick<Siniestro, 'created_at' | 'dias_ajuste' | 'dias_ajuste_fecha' | 'pausado'>
 ): number {
   if (s.dias_ajuste != null && s.dias_ajuste_fecha) {
+    if (s.pausado) return s.dias_ajuste; // congelado durante la pausa
     return s.dias_ajuste + diasHabilesDesde(s.dias_ajuste_fecha);
   }
   return diasHabilesDesde(s.created_at);

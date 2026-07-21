@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import type { Siniestro, SiniestroMovimiento, TipoSiniestro } from '@/lib/types';
+import type { Siniestro, SiniestroMovimiento, TipoSiniestro, Usuario, UsuarioAcceso } from '@/lib/types';
 import { BarChart, LineChart, MetricCard } from '@/components/DashboardCharts';
 import { useUser } from '@/components/UserContext';
 import { puedeVerRuta, rutaInicialPara } from '@/lib/permissions';
-import { ETAPAS_FINALES, TIPO_LABELS } from '@/lib/workflows';
+import { TIPO_LABELS } from '@/lib/workflows';
 
 type RangoFiltro = '7d' | '30d' | '90d' | 'mes-actual' | 'año-actual' | 'todo' | 'custom';
 type TipoFiltro = TipoSiniestro | 'todos';
+type Granularidad = 'semana' | 'mes';
 
 function inicioMesActual() {
   const d = new Date();
@@ -20,17 +21,85 @@ function inicioAñoActual() {
   return new Date(new Date().getFullYear(), 0, 1);
 }
 
+// ---------- Helpers de montos (v10) ----------
+
+/** Sumas separadas por moneda */
+interface Sumas {
+  PEN: number;
+  USD: number;
+}
+
+function sumarMontos(list: Siniestro[]): Sumas {
+  const out: Sumas = { PEN: 0, USD: 0 };
+  for (const s of list) {
+    if (s.monto == null) continue;
+    if (s.moneda === 'USD') out.USD += Number(s.monto);
+    else out.PEN += Number(s.monto);
+  }
+  return out;
+}
+
+function fmtMoney(n: number, moneda: 'PEN' | 'USD' = 'PEN'): string {
+  const sym = moneda === 'USD' ? '$' : 'S/';
+  return `${sym} ${n.toLocaleString('es-PE', { maximumFractionDigits: 0 })}`;
+}
+
+/** Valor principal (PEN) + nota si además hay USD */
+function moneyDisplay(s: Sumas): { value: string; extra: string | null } {
+  if (s.PEN === 0 && s.USD > 0) return { value: fmtMoney(s.USD, 'USD'), extra: null };
+  return { value: fmtMoney(s.PEN, 'PEN'), extra: s.USD > 0 ? `+ ${fmtMoney(s.USD, 'USD')}` : null };
+}
+
+// ---------- Helpers de buckets de tiempo ----------
+
+function claveMes(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function labelMes(clave: string): string {
+  const [year, mm] = clave.split('-');
+  const monthLabel = new Date(Number(year), Number(mm) - 1).toLocaleString('es-PE', { month: 'short' });
+  return `${monthLabel} ${year.slice(2)}`;
+}
+/** Lunes de la semana de la fecha, como clave YYYY-MM-DD */
+function claveSemana(d: Date): string {
+  const lunes = new Date(d);
+  lunes.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return `${lunes.getFullYear()}-${String(lunes.getMonth() + 1).padStart(2, '0')}-${String(lunes.getDate()).padStart(2, '0')}`;
+}
+function labelSemana(clave: string): string {
+  const [y, m, dd] = clave.split('-').map(Number);
+  const d = new Date(y, m - 1, dd);
+  return d.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' });
+}
+
+/** Cuenta elementos por bucket temporal y devuelve la serie ordenada */
+function serieTemporal(
+  fechas: Date[],
+  gran: Granularidad
+): { label: string; value: number }[] {
+  const buckets = new Map<string, number>();
+  for (const f of fechas) {
+    const key = gran === 'mes' ? claveMes(f) : claveSemana(f);
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
+  return Array.from(buckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => ({ label: gran === 'mes' ? labelMes(k) : labelSemana(k), value: v }));
+}
+
 export default function DashboardPage() {
-  const { usuario, loading: loadingUser } = useUser();
+  const { usuario, usuarios, loading: loadingUser } = useUser();
   const router = useRouter();
   const [siniestros, setSiniestros] = useState<Siniestro[]>([]);
   const [movimientos, setMovimientos] = useState<SiniestroMovimiento[]>([]);
+  const [accesos, setAccesos] = useState<UsuarioAcceso[]>([]);
   const [loading, setLoading] = useState(true);
   const [rango, setRango] = useState<RangoFiltro>('30d');
   const [desdeCustom, setDesdeCustom] = useState('');
   const [hastaCustom, setHastaCustom] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState<TipoFiltro>('todos');
   const [responsableFiltro, setResponsableFiltro] = useState('');
+  const [granularidad, setGranularidad] = useState<Granularidad>('semana');
 
   useEffect(() => {
     if (!loadingUser && usuario && !puedeVerRuta(usuario, '/dashboard')) {
@@ -40,12 +109,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function cargar() {
-      const [{ data: s }, { data: m }] = await Promise.all([
+      const [{ data: s }, { data: m }, { data: a }] = await Promise.all([
         supabase.from('siniestros').select('*'),
         supabase.from('siniestro_movimientos').select('*').order('timestamp', { ascending: true }),
+        supabase.from('usuario_accesos').select('*').order('fecha', { ascending: false }),
       ]);
       setSiniestros(s ?? []);
       setMovimientos(m ?? []);
+      setAccesos(a ?? []);
       setLoading(false);
     }
     void cargar();
@@ -90,6 +161,15 @@ export default function DashboardPage() {
     hasta,
   ]);
 
+  /** Estudio del solicitante (abogado → su estudio; equipo interno → "Pacífico") */
+  const estudioDe = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of usuarios) {
+      map.set(u.nombre, u.rol === 'abogado' ? (u.estudio ?? 'Sin estudio') : 'Pacífico');
+    }
+    return (solicitante: string) => map.get(solicitante) ?? 'Sin estudio';
+  }, [usuarios]);
+
   // Métricas principales
   const metrics = useMemo(() => {
     const pendientes = siniestrosFiltrados.filter((s) => !s.closed_at);
@@ -115,6 +195,152 @@ export default function DashboardPage() {
 
     return { pendientes, cerrados, promedioCierre, pendientesPorTipo };
   }, [siniestrosFiltrados]);
+
+  // ---------- v10: métricas de montos ----------
+  const montos = useMemo(() => {
+    const de = (tipo: TipoSiniestro, cerrado: boolean) =>
+      siniestrosFiltrados.filter((s) => s.tipo === tipo && (cerrado ? !!s.closed_at : !s.closed_at));
+
+    const pagosCerrados = de('pago', true);
+    const pagosPendientes = de('pago', false);
+    const dedCerrados = de('deducible', true);
+    const dedPendientes = de('deducible', false);
+    const reemCerrados = de('reembolso', true);
+    const reemPendientes = de('reembolso', false);
+
+    // Pago promedio por siniestro (solo PEN, pagos con monto)
+    const pagosConMontoPEN = siniestrosFiltrados.filter(
+      (s) => s.tipo === 'pago' && s.monto != null && s.moneda !== 'USD'
+    );
+    const pagoPromedio =
+      pagosConMontoPEN.length === 0
+        ? 0
+        : pagosConMontoPEN.reduce((acc, s) => acc + Number(s.monto), 0) / pagosConMontoPEN.length;
+
+    return {
+      pagadoTerceros: sumarMontos(pagosCerrados),
+      pagosPendientes: sumarMontos(pagosPendientes),
+      dedCobrado: sumarMontos(dedCerrados),
+      dedPendiente: sumarMontos(dedPendientes),
+      reembolsado: sumarMontos(reemCerrados),
+      reemPendiente: sumarMontos(reemPendientes),
+      pagoPromedio,
+      pagosConMontoCount: pagosConMontoPEN.length,
+    };
+  }, [siniestrosFiltrados]);
+
+  // Monto pagado a terceros por mes (PEN, por fecha de cierre)
+  const montoPagadoPorMes = useMemo(() => {
+    const buckets = new Map<string, number>();
+    for (const s of siniestrosFiltrados) {
+      if (s.tipo !== 'pago' || !s.closed_at || s.monto == null || s.moneda === 'USD') continue;
+      const key = claveMes(new Date(s.closed_at));
+      buckets.set(key, (buckets.get(key) ?? 0) + Number(s.monto));
+    }
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => ({ label: labelMes(k), value: Math.round(v) }));
+  }, [siniestrosFiltrados]);
+
+  // Monto cobrado en deducibles por mes (PEN, por fecha de cierre)
+  const montoDeduciblesPorMes = useMemo(() => {
+    const buckets = new Map<string, number>();
+    for (const s of siniestrosFiltrados) {
+      if (s.tipo !== 'deducible' || !s.closed_at || s.monto == null || s.moneda === 'USD') continue;
+      const key = claveMes(new Date(s.closed_at));
+      buckets.set(key, (buckets.get(key) ?? 0) + Number(s.monto));
+    }
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => ({ label: labelMes(k), value: Math.round(v) }));
+  }, [siniestrosFiltrados]);
+
+  // Pago promedio por siniestro, por mes (PEN, por fecha de solicitud)
+  const pagoPromedioPorMes = useMemo(() => {
+    const buckets = new Map<string, { total: number; count: number }>();
+    for (const s of siniestrosFiltrados) {
+      if (s.tipo !== 'pago' || s.monto == null || s.moneda === 'USD') continue;
+      const key = claveMes(new Date(s.created_at));
+      const cur = buckets.get(key) ?? { total: 0, count: 0 };
+      cur.total += Number(s.monto);
+      cur.count += 1;
+      buckets.set(key, cur);
+    }
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => ({ label: labelMes(k), value: Math.round(v.total / v.count) }));
+  }, [siniestrosFiltrados]);
+
+  // Solicitudes por semana/mes por tipo (pagos, deducibles, reembolsos)
+  const solicitudesPorTipo = useMemo(() => {
+    const fechasDe = (tipo: TipoSiniestro) =>
+      siniestrosFiltrados.filter((s) => s.tipo === tipo).map((s) => new Date(s.created_at));
+    return {
+      pago: serieTemporal(fechasDe('pago'), granularidad),
+      deducible: serieTemporal(fechasDe('deducible'), granularidad),
+      reembolso: serieTemporal(fechasDe('reembolso'), granularidad),
+    };
+  }, [siniestrosFiltrados, granularidad]);
+
+  // Solicitudes por estudio (conteo) y monto promedio por estudio / por persona
+  const porEstudio = useMemo(() => {
+    const conteo = new Map<string, number>();
+    const montoPorEstudio = new Map<string, { total: number; count: number }>();
+    const montoPorPersona = new Map<string, { total: number; count: number }>();
+    for (const s of siniestrosFiltrados) {
+      const est = estudioDe(s.solicitante);
+      conteo.set(est, (conteo.get(est) ?? 0) + 1);
+      if (s.monto != null && s.moneda !== 'USD' && (s.tipo === 'pago' || s.tipo === 'reembolso')) {
+        const ce = montoPorEstudio.get(est) ?? { total: 0, count: 0 };
+        ce.total += Number(s.monto);
+        ce.count += 1;
+        montoPorEstudio.set(est, ce);
+        const cp = montoPorPersona.get(s.solicitante) ?? { total: 0, count: 0 };
+        cp.total += Number(s.monto);
+        cp.count += 1;
+        montoPorPersona.set(s.solicitante, cp);
+      }
+    }
+    const solicitudes = Array.from(conteo.entries())
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+    const promedioEstudio = Array.from(montoPorEstudio.entries())
+      .map(([label, v]) => ({ label, value: Math.round(v.total / v.count) }))
+      .sort((a, b) => b.value - a.value);
+    const promedioPersona = Array.from(montoPorPersona.entries())
+      .map(([label, v]) => ({ label, value: Math.round(v.total / v.count) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+    return { solicitudes, promedioEstudio, promedioPersona };
+  }, [siniestrosFiltrados, estudioDe]);
+
+  // ---------- v10: accesos de abogados ----------
+  const accesosAbogados = useMemo(() => {
+    const abogados = usuarios.filter((u) => u.rol === 'abogado');
+    const porUsuario = new Map<string, UsuarioAcceso[]>();
+    for (const a of accesos) {
+      const arr = porUsuario.get(a.usuario_nombre) ?? [];
+      arr.push(a);
+      porUsuario.set(a.usuario_nombre, arr);
+    }
+    const enRango = (fecha: string) => {
+      const d = new Date(`${fecha}T12:00:00`);
+      if (desde && d < desde) return false;
+      if (hasta && d > hasta) return false;
+      return true;
+    };
+    return abogados
+      .map((u: Usuario) => {
+        const suyos = porUsuario.get(u.nombre) ?? [];
+        const diasEnRango = suyos.filter((a) => enRango(a.fecha)).length;
+        const ultimo = suyos.length > 0 ? suyos.reduce((m, a) => (a.fecha > m ? a.fecha : m), suyos[0].fecha) : null;
+        return { nombre: u.nombre, estudio: u.estudio ?? '—', diasEnRango, ultimo };
+      })
+      .sort((a, b) => {
+        if (b.diasEnRango !== a.diasEnRango) return b.diasEnRango - a.diasEnRango;
+        return (b.ultimo ?? '').localeCompare(a.ultimo ?? '');
+      });
+  }, [usuarios, accesos, desde, hasta]);
 
   // Tiempo promedio por etapa y por responsable (calculado a partir de movimientos)
   // Para cada par de movimientos consecutivos de un siniestro, el "responsable" del tramo es
@@ -168,16 +394,11 @@ export default function DashboardPage() {
     const buckets = new Map<string, number>();
     const cerrados = siniestrosFiltrados.filter((s) => s.closed_at);
     for (const s of cerrados) {
-      const d = new Date(s.closed_at!);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const key = claveMes(new Date(s.closed_at!));
       buckets.set(key, (buckets.get(key) ?? 0) + 1);
     }
     const sorted = Array.from(buckets.entries()).sort(([a], [b]) => a.localeCompare(b));
-    return sorted.map(([k, v]) => {
-      const [year, mm] = k.split('-');
-      const monthLabel = new Date(Number(year), Number(mm) - 1).toLocaleString('es-PE', { month: 'short' });
-      return { label: `${monthLabel} ${year.slice(2)}`, value: v };
-    });
+    return sorted.map(([k, v]) => ({ label: labelMes(k), value: v }));
   }, [siniestrosFiltrados]);
 
   // Tendencia: promedio de días de cierre por mes
@@ -185,8 +406,7 @@ export default function DashboardPage() {
     const buckets = new Map<string, { total: number; count: number }>();
     for (const s of siniestrosFiltrados) {
       if (!s.closed_at) continue;
-      const d = new Date(s.closed_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const key = claveMes(new Date(s.closed_at));
       const dias = (new Date(s.closed_at).getTime() - new Date(s.created_at).getTime()) / (1000 * 60 * 60 * 24);
       const cur = buckets.get(key) ?? { total: 0, count: 0 };
       cur.total += dias;
@@ -194,11 +414,7 @@ export default function DashboardPage() {
       buckets.set(key, cur);
     }
     const sorted = Array.from(buckets.entries()).sort(([a], [b]) => a.localeCompare(b));
-    return sorted.map(([k, v]) => {
-      const [year, mm] = k.split('-');
-      const monthLabel = new Date(Number(year), Number(mm) - 1).toLocaleString('es-PE', { month: 'short' });
-      return { label: `${monthLabel} ${year.slice(2)}`, value: Number((v.total / v.count).toFixed(1)) };
-    });
+    return sorted.map(([k, v]) => ({ label: labelMes(k), value: Number((v.total / v.count).toFixed(1)) }));
   }, [siniestrosFiltrados]);
 
   // Pendientes por tipo (bar chart)
@@ -213,6 +429,11 @@ export default function DashboardPage() {
 
   if (loadingUser || !usuario) return null;
   if (!puedeVerRuta(usuario, '/dashboard')) return null;
+
+  const dispPagado = moneyDisplay(montos.pagadoTerceros);
+  const dispDedCobrado = moneyDisplay(montos.dedCobrado);
+  const dispDedPendiente = moneyDisplay(montos.dedPendiente);
+  const dispReembolsado = moneyDisplay(montos.reembolsado);
 
   return (
     <div className="space-y-6">
@@ -322,6 +543,213 @@ export default function DashboardPage() {
               value={siniestrosFiltrados.length}
               hint="Filtrados en el rango"
             />
+          </div>
+
+          {/* v10 — Cards de montos */}
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <MetricCard
+              label="Pagado a terceros"
+              value={dispPagado.value}
+              hint={dispPagado.extra ?? 'Pagos cerrados en el rango'}
+              tone="success"
+            />
+            <MetricCard
+              label="Cobrado en deducibles"
+              value={dispDedCobrado.value}
+              hint={dispDedCobrado.extra ?? 'Deducibles cobrados en el rango'}
+              tone="success"
+            />
+            <MetricCard
+              label="Pendiente de cobro (ded.)"
+              value={dispDedPendiente.value}
+              hint={dispDedPendiente.extra ?? 'Deducibles aún no cobrados'}
+              tone="warning"
+            />
+            <MetricCard
+              label="Reembolsado"
+              value={dispReembolsado.value}
+              hint={dispReembolsado.extra ?? 'Reembolsos pagados en el rango'}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <MetricCard
+              label="Pago promedio x siniestro"
+              value={fmtMoney(Math.round(montos.pagoPromedio))}
+              hint={`Sobre ${montos.pagosConMontoCount} pagos con monto (PEN)`}
+              tone="primary"
+            />
+            <MetricCard
+              label="Pagos por pagar"
+              value={moneyDisplay(montos.pagosPendientes).value}
+              hint={moneyDisplay(montos.pagosPendientes).extra ?? 'Pagos en curso (no cerrados)'}
+            />
+            <MetricCard
+              label="Reembolsos por pagar"
+              value={moneyDisplay(montos.reemPendiente).value}
+              hint={moneyDisplay(montos.reemPendiente).extra ?? 'Reembolsos en curso'}
+            />
+            <MetricCard
+              label="Solicitudes en el rango"
+              value={siniestrosFiltrados.length}
+              hint="Todas las gestiones solicitadas"
+            />
+          </div>
+
+          {/* v10 — Montos en el tiempo */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ChartCard title="Monto pagado a terceros por mes (S/)">
+              <BarChart
+                data={montoPagadoPorMes}
+                color="#10B981"
+                formatValue={(v) => fmtMoney(v)}
+                emptyMessage="No hay pagos cerrados con monto en el rango."
+              />
+            </ChartCard>
+            <ChartCard title="Monto cobrado en deducibles por mes (S/)">
+              <BarChart
+                data={montoDeduciblesPorMes}
+                color="#F59E0B"
+                formatValue={(v) => fmtMoney(v)}
+                emptyMessage="No hay deducibles cobrados con monto en el rango."
+              />
+            </ChartCard>
+            <ChartCard title="Pago promedio por siniestro, por mes (S/)" full>
+              <LineChart
+                data={pagoPromedioPorMes}
+                color="#2EA1FF"
+                formatValue={(v) => fmtMoney(Math.round(v))}
+              />
+            </ChartCard>
+          </div>
+
+          {/* v10 — Solicitudes por semana/mes por tipo */}
+          <div className="rounded-2xl panel p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-white/60">
+                Solicitudes por {granularidad === 'semana' ? 'semana' : 'mes'}
+              </h3>
+              <div className="flex rounded-lg bg-white/5 border border-white/10 p-0.5 text-xs">
+                {(['semana', 'mes'] as Granularidad[]).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setGranularidad(g)}
+                    className={`rounded-md px-3 py-1 font-semibold transition ${
+                      granularidad === g ? 'bg-pacifico-secondary text-white' : 'text-white/50 hover:text-white'
+                    }`}
+                  >
+                    {g === 'semana' ? 'Semana' : 'Mes'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-6 lg:grid-cols-3">
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/40">Pagos</div>
+                <BarChart data={solicitudesPorTipo.pago} color="#2EA1FF" emptyMessage="Sin pagos en el rango." />
+              </div>
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/40">Deducibles</div>
+                <BarChart data={solicitudesPorTipo.deducible} color="#F59E0B" emptyMessage="Sin deducibles en el rango." />
+              </div>
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/40">Reembolsos</div>
+                <BarChart data={solicitudesPorTipo.reembolso} color="#A78BFA" emptyMessage="Sin reembolsos en el rango." />
+              </div>
+            </div>
+          </div>
+
+          {/* v10 — Por estudio / por persona */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ChartCard title="Solicitudes por estudio">
+              <BarChart
+                data={porEstudio.solicitudes}
+                color="#0058D4"
+                emptyMessage="Sin solicitudes en el rango."
+              />
+            </ChartCard>
+            <ChartCard title="Monto promedio por estudio (pagos y reembolsos, S/)">
+              <BarChart
+                data={porEstudio.promedioEstudio}
+                color="#10B981"
+                formatValue={(v) => fmtMoney(v)}
+                emptyMessage="Sin montos en el rango."
+              />
+            </ChartCard>
+            <ChartCard title="Monto promedio por persona (pagos y reembolsos, S/)" full>
+              <BarChart
+                data={porEstudio.promedioPersona}
+                color="#2EA1FF"
+                formatValue={(v) => fmtMoney(v)}
+                emptyMessage="Sin montos en el rango."
+              />
+            </ChartCard>
+          </div>
+
+          {/* v10 — Accesos de abogados */}
+          <div className="rounded-2xl panel p-5">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-white/60 mb-1">
+              Accesos de abogados a la plataforma
+            </h3>
+            <p className="text-xs text-white/40 mb-4">
+              Se registra un acceso por día cuando el abogado entra con su usuario. “Días activos” cuenta dentro del rango seleccionado.
+            </p>
+            {accesosAbogados.length === 0 ? (
+              <div className="py-6 text-center text-sm text-white/40">No hay abogados registrados.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-white/40 border-b border-white/10">
+                      <th className="py-2 pr-4">Abogado</th>
+                      <th className="py-2 pr-4">Estudio</th>
+                      <th className="py-2 pr-4">Días activos (rango)</th>
+                      <th className="py-2 pr-4">Último acceso</th>
+                      <th className="py-2">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accesosAbogados.map((a) => {
+                      const nunca = !a.ultimo;
+                      const activoEnRango = a.diasEnRango > 0;
+                      return (
+                        <tr key={a.nombre} className="border-b border-white/5">
+                          <td className="py-2 pr-4 text-white">{a.nombre}</td>
+                          <td className="py-2 pr-4 text-white/70">{a.estudio}</td>
+                          <td className="py-2 pr-4 text-white/70">{a.diasEnRango}</td>
+                          <td className="py-2 pr-4 text-white/70">
+                            {a.ultimo
+                              ? new Date(`${a.ultimo}T12:00:00`).toLocaleDateString('es-PE', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })
+                              : 'Nunca'}
+                          </td>
+                          <td className="py-2">
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                                activoEnRango
+                                  ? 'bg-emerald-500/15 text-emerald-300'
+                                  : nunca
+                                    ? 'bg-red-500/15 text-red-300'
+                                    : 'bg-amber-500/15 text-amber-300'
+                              }`}
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  activoEnRango ? 'bg-emerald-400' : nunca ? 'bg-red-400' : 'bg-amber-400'
+                                }`}
+                              />
+                              {activoEnRango ? 'Activo' : nunca ? 'Nunca entró' : 'Sin actividad en el rango'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Grid de gráficos */}

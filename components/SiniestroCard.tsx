@@ -1,7 +1,7 @@
 'use client';
 
 import type { Siniestro } from '@/lib/types';
-import { cn, censurar, colorPorDias, diasEfectivos, formatMoneda, type NivelUrgencia } from '@/lib/utils';
+import { cn, censurar, colorPorDias, diasEfectivos, estaPausado, formatMoneda, type NivelUrgencia } from '@/lib/utils';
 import { useMemo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -36,6 +36,7 @@ const badgeByUrgencia: Record<NivelUrgencia, string> = {
 export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
   const { usuario } = useUser();
   const censura = debeCensurar(usuario);
+  const pausado = estaPausado(siniestro);
   const diasAbierto = useMemo(() => diasEfectivos(siniestro), [siniestro]);
   const urgencia = useMemo(() => colorPorDias(diasAbierto), [diasAbierto]);
   // El nombre del abogado (reembolso a abogado) no es dato personal de terceros: no se censura
@@ -62,6 +63,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           'card-base rounded-lg border-l-[3px] overflow-hidden',
           borderByTipo[siniestro.tipo],
           siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
+          pausado && 'ring-1 ring-amber-400/50 bg-amber-500/[0.06]',
           draggable && 'cursor-grab active:cursor-grabbing',
           isDragging && 'dragging'
         )}
@@ -70,14 +72,15 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           onClick={onClick}
           {...dragProps}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-          title={`${siniestro.codigo} · ${nombreMostrado} · ${diasAbierto}d abierto${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
+          title={`${siniestro.codigo} · ${nombreMostrado} · ${pausado ? 'contador pausado' : `${diasAbierto}d abierto`}${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
         >
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1">
             {siniestro.codigo}
           </span>
+          {pausado && <PauseDot />}
           {siniestro.es_pago_cuenta && <BankDot />}
           {siniestro.correo_enviado && <MailDot />}
-          <DayBadge dias={diasAbierto} urgencia={urgencia} />
+          <DayBadge dias={diasAbierto} urgencia={urgencia} pausado={pausado} />
         </button>
       </div>
     );
@@ -91,6 +94,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         'card-base rounded-lg border-l-[3px] overflow-hidden',
         borderByTipo[siniestro.tipo],
         siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
+        pausado && 'ring-1 ring-amber-400/50 bg-amber-500/[0.06]',
         draggable && 'cursor-grab active:cursor-grabbing',
         isDragging && 'dragging'
       )}
@@ -99,10 +103,11 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         <div className="flex items-start justify-between gap-2">
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex items-center gap-1.5">
             {siniestro.codigo}
+            {pausado && <PauseDot />}
             {siniestro.es_pago_cuenta && <BankDot />}
             {siniestro.correo_enviado && <MailDot />}
           </span>
-          <DayBadge dias={diasAbierto} urgencia={urgencia} />
+          <DayBadge dias={diasAbierto} urgencia={urgencia} pausado={pausado} />
         </div>
 
         <div className="mt-1.5 space-y-0.5">
@@ -119,6 +124,19 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
                 <path d="M4 8v6h2V8H4zm5 0v6h2V8H9zm5 0v6h2V8h-2zM2 16h16v2H2v-2z" />
               </svg>
               Pago en cuenta
+            </div>
+          )}
+          {pausado && (
+            <div className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+              <div className="flex items-center gap-1 font-semibold">
+                <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
+                </svg>
+                Contador pausado
+              </div>
+              {siniestro.nota_pausa && (
+                <div className="mt-0.5 line-clamp-2 text-amber-100/70 font-normal">{siniestro.nota_pausa}</div>
+              )}
             </div>
           )}
           {siniestro.tipo === 'pago' && siniestro.deducible_pagado != null && (
@@ -145,7 +163,20 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
   );
 }
 
-function DayBadge({ dias, urgencia }: { dias: number; urgencia: NivelUrgencia }) {
+function DayBadge({ dias, urgencia, pausado }: { dias: number; urgencia: NivelUrgencia; pausado?: boolean }) {
+  if (pausado) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
+        title={`Contador pausado (${dias}d congelados)`}
+      >
+        <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
+        </svg>
+        —
+      </span>
+    );
+  }
   return (
     <span
       className={cn(
@@ -156,6 +187,20 @@ function DayBadge({ dias, urgencia }: { dias: number; urgencia: NivelUrgencia })
     >
       <span className="font-semibold">{dias}</span>
       <span className="opacity-70">d</span>
+    </span>
+  );
+}
+
+/** Indicador de contador pausado por Pacífico (ícono de pausa ámbar) */
+function PauseDot() {
+  return (
+    <span
+      className="inline-grid h-4 w-4 place-items-center rounded-sm text-amber-300"
+      title="Contador pausado por Pacífico"
+    >
+      <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
+      </svg>
     </span>
   );
 }
