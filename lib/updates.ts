@@ -12,6 +12,14 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-08-03',
+    fecha: '2026-08-03',
+    titulo: 'Casos urgentes',
+    items: [
+      'Caso urgente (Pacífico): desde el detalle de un siniestro, el equipo de Pacífico puede marcarlo como urgente. En el tablero se distingue con un marco rojo, un ícono de alerta y la etiqueta "URGENTE".',
+    ],
+  },
+  {
     id: '2026-07-21',
     fecha: '2026-07-21',
     titulo: 'KPIs de montos, notas de pausa y control de accesos',

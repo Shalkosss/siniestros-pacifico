@@ -267,6 +267,24 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     if (window.location.pathname.startsWith('/siniestro/')) router.push('/');
   }
 
+  async function toggleUrgente() {
+    if (!puedeMoverEnGeneral) return;
+    const nuevo = !siniestro.urgente;
+    const { error } = await supabase
+      .from('siniestros')
+      .update({ urgente: nuevo })
+      .eq('id', siniestro.id);
+    if (error) { alert('Error: ' + error.message); return; }
+    await supabase.from('siniestro_movimientos').insert({
+      siniestro_id: siniestro.id,
+      estado_anterior: siniestro.estado,
+      estado_nuevo: siniestro.estado,
+      movido_por: usuario?.nombre ?? 'sistema',
+      notas: nuevo ? 'Marcado como urgente' : 'Se quitó la marca de urgente',
+    });
+    onChanged();
+  }
+
   async function actualizarDeduciblePagado(valor: boolean) {
     if (!puedeMoverEnGeneral) return;
     // Toggle: si ya estaba en ese valor, vuelve a "sin indicar" (null).
@@ -410,6 +428,14 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
           <div className={cn('text-[10px] font-semibold uppercase tracking-[0.16em]', accentTextByTipo[siniestro.tipo])}>
             {tipoLabel[siniestro.tipo]}
             {siniestro.reembolso_abogado ? ' · a abogado' : ''}
+            {siniestro.urgente && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2 py-0.5 text-[9px] font-bold text-red-300 ring-1 ring-red-500/40 normal-case tracking-normal">
+                <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                Urgente
+              </span>
+            )}
             {isArchivado && (
               <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[9px] text-slate-300 normal-case tracking-normal">
                 Archivado
@@ -470,6 +496,40 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                 )}
               </div>
             </div>
+          )}
+
+          {/* Marcar como urgente (pacífico: admin/terceros) */}
+          {puedeMoverEnGeneral && (
+            <button
+              onClick={toggleUrgente}
+              className={cn(
+                'flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition',
+                siniestro.urgente
+                  ? 'border-red-500/40 bg-red-500/10 hover:bg-red-500/15'
+                  : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.04]'
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <svg
+                  className={cn('h-4 w-4', siniestro.urgente ? 'text-red-400' : 'text-slate-400')}
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span className="text-sm font-medium text-slate-200">
+                  {siniestro.urgente ? 'Caso marcado como urgente' : 'Marcar como caso urgente'}
+                </span>
+              </span>
+              <span
+                className={cn(
+                  'text-[11px] font-semibold',
+                  siniestro.urgente ? 'text-red-300' : 'text-slate-500'
+                )}
+              >
+                {siniestro.urgente ? 'Quitar' : 'Marcar'}
+              </span>
+            </button>
           )}
 
           {puedeMoverEnGeneral && !isFinal && !isArchivado && (

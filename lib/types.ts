@@ -56,6 +56,8 @@ export interface Siniestro {
   // sea true, el contador de días queda congelado y en el tablero se muestra "—".
   nota_pausa: string | null;
   pausado: boolean;
+  // v11 — caso urgente (lo marca Pacífico). Se distingue visualmente en el tablero.
+  urgente: boolean;
 }
 
 /** v8.1 — tipo de documento de identidad */

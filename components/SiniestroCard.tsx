@@ -37,6 +37,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
   const { usuario } = useUser();
   const censura = debeCensurar(usuario);
   const pausado = estaPausado(siniestro);
+  const urgente = !!siniestro.urgente;
   const diasAbierto = useMemo(() => diasEfectivos(siniestro), [siniestro]);
   const urgencia = useMemo(() => colorPorDias(diasAbierto), [diasAbierto]);
   // El nombre del abogado (reembolso a abogado) no es dato personal de terceros: no se censura
@@ -64,6 +65,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           borderByTipo[siniestro.tipo],
           siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
           pausado && 'ring-1 ring-amber-400/50 bg-amber-500/[0.06]',
+          urgente && 'ring-2 ring-red-500/70 bg-red-500/[0.07]',
           draggable && 'cursor-grab active:cursor-grabbing',
           isDragging && 'dragging'
         )}
@@ -72,8 +74,9 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           onClick={onClick}
           {...dragProps}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-          title={`${siniestro.codigo} · ${nombreMostrado} · ${pausado ? 'contador pausado' : `${diasAbierto}d abierto`}${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
+          title={`${siniestro.codigo} · ${nombreMostrado} · ${pausado ? 'contador pausado' : `${diasAbierto}d abierto`}${urgente ? ' · URGENTE' : ''}${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
         >
+          {urgente && <UrgentDot />}
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1">
             {siniestro.codigo}
           </span>
@@ -95,11 +98,20 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         borderByTipo[siniestro.tipo],
         siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
         pausado && 'ring-1 ring-amber-400/50 bg-amber-500/[0.06]',
+        urgente && 'ring-2 ring-red-500/70 bg-red-500/[0.07]',
         draggable && 'cursor-grab active:cursor-grabbing',
         isDragging && 'dragging'
       )}
     >
       <button onClick={onClick} {...dragProps} className="block w-full text-left p-3">
+        {urgente && (
+          <div className="mb-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-red-500/20 text-red-300 ring-1 ring-red-500/40">
+            <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            Urgente
+          </div>
+        )}
         <div className="flex items-start justify-between gap-2">
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex items-center gap-1.5">
             {siniestro.codigo}
@@ -187,6 +199,20 @@ function DayBadge({ dias, urgencia, pausado }: { dias: number; urgencia: NivelUr
     >
       <span className="font-semibold">{dias}</span>
       <span className="opacity-70">d</span>
+    </span>
+  );
+}
+
+/** Indicador de caso urgente (triángulo de alerta rojo) */
+function UrgentDot() {
+  return (
+    <span
+      className="inline-grid h-4 w-4 place-items-center rounded-sm text-red-400"
+      title="Caso urgente"
+    >
+      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+      </svg>
     </span>
   );
 }
