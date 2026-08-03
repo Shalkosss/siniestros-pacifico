@@ -93,6 +93,24 @@ export interface SiniestroMovimiento {
   timestamp: string;
 }
 
+/** v12 — un lesionado del informe de caso (punto 15) */
+export interface Lesionado {
+  /** Rol en el siniestro: "Conductor Tercero", "Ocupante Tercero", "Peatón"… */
+  rol: string;
+  nombre: string;
+  edad: number | null;
+  diagnostico: string;
+  lugar_atencion: string;
+}
+
+/** v12 — teléfono de contacto del informe (punto 19) */
+export interface ContactoTelefono {
+  grupo: 'asegurado' | 'tercero';
+  /** Quién es: "Conductor", "Sra. Huamanlazo (jefa de despacho)", "Tercero"… */
+  etiqueta: string;
+  telefono: string;
+}
+
 /** v7 — Drive de Siniestros (espejo de la Base Consolidada de la métrica legal) */
 export interface DriveSiniestro {
   id: string;
@@ -122,6 +140,61 @@ export interface DriveSiniestro {
   // Alertas visuales: null = autodetección por texto; true/false = manual
   flag_fallecido: boolean | null;
   flag_unidad_retenida: boolean | null;
+
+  /* ---- v12 — Informe de caso (los 24 puntos que llenan los estudios) ----
+   * Lo sensible (nombres, diagnósticos, teléfonos, correo) NO se muestra en la
+   * tabla del Drive: vive solo en el detalle del caso y en el correo del informe.
+   */
+  /** Correlativo interno del estudio, ej. "147". Solo algunos estudios lo usan. */
+  nro_caso_estudio: string | null;
+  /** N° de caso de Pacífico, ej. "442783" (punto 1) */
+  nro_caso: string | null;
+  /** Punto 2 — la fecha del reporte es `fecha_registro` */
+  hora_reporte: string | null;
+  fecha_llegada: string | null;
+  hora_llegada: string | null;
+  /** Punto 3 — la fecha del siniestro es `fecha_siniestro` */
+  hora_siniestro: string | null;
+  /** Punto 4 */
+  asesor: string | null;
+  cobertura_aprobada: boolean | null;
+  /** Punto 5 — dirección exacta; provincia/distrito siguen aparte */
+  lugar: string | null;
+  /** Punto 7 — la comisaría es `comisaria` */
+  oficial_cargo: string | null;
+  oficial_telefono: string | null;
+  /** Punto 8 */
+  causa: string | null;
+  /** Punto 9 */
+  conductor_asegurado: string | null;
+  /** Punto 10 */
+  responsabilidad: string | null;
+  /** Puntos 12 y 13 */
+  placa_asegurado: string | null;
+  placa_tercero: string | null;
+  /** Punto 14 */
+  danios_materiales: boolean | null;
+  /** Punto 15 — de aquí se derivan `cant_lesionados`, `lesiones` y `lesion_principal` */
+  lesionados: Lesionado[] | null;
+  /** Punto 16 */
+  monto_cierre: number | null;
+  monto_lesiones: number | null;
+  monto_danios: number | null;
+  /** Puntos 17 y 18 */
+  en_negociacion: boolean | null;
+  comunicaciones: boolean | null;
+  /** Punto 19 */
+  contactos: ContactoTelefono[] | null;
+  /** Punto 20 */
+  correo_asegurado: string | null;
+  /** Punto 21 */
+  proceso_penal: boolean | null;
+  proceso_civil: boolean | null;
+  /** Puntos 22 y 23 */
+  observaciones: string | null;
+  recomendacion: string | null;
+  /** Punto 24 */
+  fecha_actualizacion: string | null;
 }
 
 /** v10 — registro de acceso diario (una fila por usuario por día) */

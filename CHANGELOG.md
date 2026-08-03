@@ -4,7 +4,27 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ---
 
-## v9 — Montos por beneficiario + Código editable + Reembolso a abogado (actual)
+## v12 — Informe de caso en el Drive (actual)
+
+**Migración requerida:** `supabase/migration_v12.sql` (columnas del informe: identificadores, horas, asesor, placas, `lesionados` y `contactos` en jsonb, montos, procesos, observaciones)
+
+### Nuevo
+- **Formulario de informe de caso** ([`DriveInformeModal.tsx`](components/DriveInformeModal.tsx)): "Agregar siniestro" en el Drive pide ahora los 24 puntos del informe que los estudios envían a Pacífico, en vez del set anterior de la base consolidada. Los lesionados y los contactos telefónicos son listas: se agregan y quitan uno por uno.
+- **N° de caso del estudio (opcional)**: correlativo interno que solo usan algunos estudios (RVC). Viene apagado por defecto; al activarlo aparece en el asunto del correo como `ASESORÍA LEGAL N° 147/06`.
+- **Envío del informe por correo** ([`lib/informe.ts`](lib/informe.ts), [`DriveInformeEmail.tsx`](components/DriveInformeEmail.tsx)): botón que abre Gmail/Outlook/Yahoo con el informe ya redactado. Los datos que falten salen como `-`. Va a María Elena y Rodrigo, con copia a Marcos, Siniestros Autos y Soporte Autos (editable en `DESTINATARIOS_INFORME`).
+- **Detalle del caso** ([`DriveDetalleModal.tsx`](components/DriveDetalleModal.tsx)): clic en cualquier fila del Drive abre el informe completo y el panel de correo. Segunda pestaña para completar la métrica legal (reserva inicial/final, ahorro, gravedad, lesión principal, sub estado y cierre).
+- **Columna Placa** en la tabla del Drive, en la búsqueda y en el Excel exportado.
+- **La importación de Excel ahora actualiza** ([`lib/driveExcel.ts`](lib/driveExcel.ts)): los casos ya registrados dejan de omitirse — si el Excel trae datos distintos, manda el Excel. Antes de importar se avisa cuántos se van a actualizar y qué cambia en cada uno (`Estado: ABIERTO → CERRADO`). Las celdas vacías no borran lo que ya estaba.
+
+### Cambios
+- **Privacidad en el Drive**: nombres de lesionados, diagnósticos, conductor/asegurado, teléfonos, correo y oficial a cargo ya no se ven en la tabla; viven solo en el detalle y en el correo del informe. La columna "Lesión principal" guarda únicamente el valor del catálogo, nunca el diagnóstico literal.
+- **Estudio y abogado automáticos**: al registrar un caso se toman del usuario logueado (Pierina → Pierina / RVC). Pacífico los sigue eligiendo a mano.
+- **Menos campos al dar de alta**: reserva inicial, reserva final, ahorro y gravedad ya no se piden al crear; se completan después desde el detalle. El estado entra siempre como `ABIERTO` y el sub estado sale de "En negociación".
+- **Fechas del Drive sin corrimiento** ([`lib/utils.ts`](lib/utils.ts) → `formatFechaSolo`): las columnas `date` se mostraban un día antes por zona horaria (UTC-5).
+
+---
+
+## v9 — Montos por beneficiario + Código editable + Reembolso a abogado
 
 **Migración requerida:** `supabase/migration_v9.sql` (columna `reembolso_abogado`; los montos por beneficiario viven dentro del jsonb `beneficiarios`)
 

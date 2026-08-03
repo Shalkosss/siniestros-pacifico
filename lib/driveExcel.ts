@@ -34,13 +34,34 @@ export interface DriveImportRow {
   estado: string | null;
   estudio: string;
   creado_por: string | null;
+  /** v12 — dato público del informe; también se puede traer del Excel */
+  placa_asegurado: string | null;
+}
+
+/** Campos que la importación puede pisar en un caso ya registrado. */
+export type DriveUpdatePatch = Partial<Omit<DriveImportRow, 'siniestro' | 'estudio' | 'creado_por'>>;
+
+/** Caso que ya existe en la base y que el Excel trae con datos distintos. */
+export interface DriveUpdateRow {
+  id: string;
+  siniestro: string;
+  estudio: string;
+  patch: DriveUpdatePatch;
+  /** Descripción legible de cada cambio: 'Estado: ABIERTO → CERRADO' */
+  cambios: string[];
 }
 
 export interface DriveImportResult {
-  /** Filas válidas listas para insertar */
+  /** Casos nuevos, listos para insertar */
   filas: DriveImportRow[];
-  /** Filas omitidas por ya existir (mismo código de siniestro en el mismo estudio) */
-  duplicados: string[];
+  /**
+   * Casos que ya estaban registrados y que el Excel actualiza.
+   * Manda siempre el Excel: si trae un valor distinto, ese valor gana.
+   * Las celdas vacías no borran lo que ya había.
+   */
+  actualizaciones: DriveUpdateRow[];
+  /** Casos ya registrados que vienen idénticos (no se tocan) */
+  sinCambios: number;
   /** Filas sin estudio identificable (solo puede pasar para Pacífico sin default) */
   sinEstudio: number;
   /** Errores por fila (fila de Excel → motivo) */
@@ -87,6 +108,9 @@ alias('sub_estado', 'sub estado', 'subestado', 'sub-estado', 'detalle estado', '
 alias('estado', 'estado', 'status', 'estatus');
 alias('estudio', 'estudio', 'estudio legal', 'estudio abogados', 'proveedor');
 alias('creado_por', 'creado por', 'registrado por');
+// Ojo: "N° CASO" ya está tomado más arriba como código de siniestro, así que
+// aquí solo agregamos variantes inequívocas de placa.
+alias('placa_asegurado', 'placa', 'placa asegurada', 'placa del vehiculo asegurado', 'placa vehiculo asegurado', 'placa asegurado', 'placa del asegurado');
 
 /**
  * Matching difuso cuando el alias exacto no calza (encabezados con caracteres
@@ -94,6 +118,7 @@ alias('creado_por', 'creado por', 'registrado por');
  * los más específicos van primero ("fecha siniestro" antes que "siniestro").
  */
 const HEADER_FUZZY: [RegExp, keyof DriveImportRow][] = [
+  [/placa/, 'placa_asegurado'],
   [/fecha.*regist|fecha.*ingreso|fecha.*asignacion|fregistro/, 'fecha_registro'],
   [/fecha.*siniestro|fecha.*ocurrencia|fsiniestro/, 'fecha_siniestro'],
   [/fecha.*cierre|fcierre/, 'fecha_cierre'],
@@ -200,12 +225,62 @@ interface ParseOptions {
   /** Si el usuario es un abogado, TODAS las filas se fuerzan a su estudio. */
   forzarEstudio: boolean;
   creadoPor: string;
-  /** Claves `${estudio}::${siniestro}` ya existentes, para omitir duplicados. */
-  existentes: Set<string>;
+  /**
+   * Casos ya registrados, indexados por `${estudio}::${siniestro}`.
+   * Sirven para decidir qué es alta nueva y qué es actualización.
+   */
+  existentes: Map<string, DriveSiniestro>;
 }
 
 export function claveDuplicado(estudio: string, siniestro: string): string {
   return `${norm(estudio)}::${norm(siniestro)}`;
+}
+
+/** Índice `${estudio}::${siniestro}` → registro, para pasarle a parseDriveExcel. */
+export function indexarExistentes(registros: DriveSiniestro[]): Map<string, DriveSiniestro> {
+  const map = new Map<string, DriveSiniestro>();
+  for (const r of registros) map.set(claveDuplicado(r.estudio, r.siniestro), r);
+  return map;
+}
+
+/** Nombre legible de cada campo, para explicar los cambios al usuario. */
+const CAMPO_LABEL: Partial<Record<keyof DriveImportRow, string>> = {
+  anio: 'Año',
+  mes: 'Mes',
+  provincia: 'Provincia',
+  distrito: 'Distrito',
+  comisaria: 'Comisaría',
+  fecha_registro: 'Fecha de registro',
+  fecha_siniestro: 'Fecha del siniestro',
+  abogado: 'Abogado',
+  cant_lesionados: 'Cant. lesionados',
+  lesiones: 'Lesiones',
+  lesion_principal: 'Lesión principal',
+  reserva_inicial: 'Reserva inicial',
+  gravedad: 'Gravedad',
+  reserva_final: 'Reserva final',
+  ahorro: 'Ahorro',
+  fecha_cierre: 'Fecha de cierre',
+  tiempo_cierre: 'Tiempo de cierre',
+  sub_estado: 'Sub estado',
+  estado: 'Estado',
+  placa_asegurado: 'Placa',
+};
+
+/** ¿El valor del Excel es el mismo que ya está guardado? */
+function mismoValor(nuevo: unknown, actual: unknown): boolean {
+  if (nuevo == null && actual == null) return true;
+  if (nuevo == null || actual == null) return false;
+  if (typeof nuevo === 'number' || typeof actual === 'number') {
+    const a = Number(nuevo);
+    const b = Number(actual);
+    if (isFinite(a) && isFinite(b)) return a === b;
+  }
+  return String(nuevo).trim() === String(actual).trim();
+}
+
+function mostrar(v: unknown): string {
+  return v == null || v === '' ? 'vacío' : String(v);
 }
 
 /**
@@ -221,7 +296,12 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
     ? XLSX.read(buffer, { type: 'string', raw: true })
     : XLSX.read(buffer, { type: 'array', cellDates: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  if (!sheet) return { filas: [], duplicados: [], sinEstudio: 0, errores: ['El archivo no tiene hojas.'], columnasIgnoradas: [] };
+  if (!sheet) {
+    return {
+      filas: [], actualizaciones: [], sinCambios: 0, sinEstudio: 0,
+      errores: ['El archivo no tiene hojas.'], columnasIgnoradas: [],
+    };
+  }
 
   // Matriz cruda para localizar la fila de encabezados (algunos reportes tienen título arriba)
   const matriz: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
@@ -246,15 +326,16 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
 
   if (headerIdx === -1) {
     return {
-      filas: [], duplicados: [], sinEstudio: 0,
+      filas: [], actualizaciones: [], sinCambios: 0, sinEstudio: 0,
       errores: ['No se encontró la fila de encabezados. El Excel debe tener una columna con el N° de siniestro (ej. "SINIESTRO") y al menos otras 2 columnas reconocibles (MES, ABOGADO, LESIONES, etc.).'],
       columnasIgnoradas: [],
     };
   }
 
   const filas: DriveImportRow[] = [];
-  const duplicados: string[] = [];
+  const actualizaciones: DriveUpdateRow[] = [];
   const errores: string[] = [];
+  let sinCambios = 0;
   let sinEstudio = 0;
   const vistosEnArchivo = new Set<string>();
 
@@ -281,10 +362,15 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
     }
     if (!estudio) { sinEstudio++; errores.push(`Fila ${filaExcel} (${siniestro}): estudio no reconocido.`); continue; }
 
-    // Duplicados: contra la base y contra el propio archivo
+    // Contra el propio archivo sí seguimos omitiendo repetidos: gana la 1ª fila.
     const clave = claveDuplicado(estudio, siniestro);
-    if (opts.existentes.has(clave) || vistosEnArchivo.has(clave)) { duplicados.push(siniestro); continue; }
+    if (vistosEnArchivo.has(clave)) continue;
     vistosEnArchivo.add(clave);
+    const existente = opts.existentes.get(clave) ?? null;
+
+    /** ¿La celda del Excel traía algo? Las vacías no pisan lo ya guardado. */
+    const hayCelda = (c: keyof DriveImportRow) =>
+      raw[c] != null && String(raw[c]).trim() !== '';
 
     const fecha_registro = toISODate(raw.fecha_registro);
     const fecha_cierre = toISODate(raw.fecha_cierre);
@@ -325,7 +411,7 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
     let cant = toNum(raw.cant_lesionados);
     if (cant != null) cant = Math.trunc(cant);
 
-    filas.push({
+    const fila: DriveImportRow = {
       siniestro,
       anio, mes,
       provincia: toStr(raw.provincia),
@@ -346,10 +432,62 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
       estado,
       estudio,
       creado_por: opts.creadoPor,
-    });
+      placa_asegurado: toStr(raw.placa_asegurado)?.toUpperCase() ?? null,
+    };
+
+    if (!existente) {
+      filas.push(fila);
+      continue;
+    }
+
+    /* ---- El caso ya existe: manda el Excel, pero solo en lo que trae ----
+     * Campos derivados: año/mes vienen de la fecha de registro; estado y tiempo
+     * de cierre, de la fecha de cierre. Por eso cuentan como "traídos" si esas
+     * columnas tenían dato.
+     */
+    const traeCierre = hayCelda('fecha_cierre');
+    const candidatos: (keyof DriveImportRow)[] = [
+      ...(hayCelda('anio') || hayCelda('fecha_registro') ? (['anio'] as const) : []),
+      ...(hayCelda('mes') || hayCelda('fecha_registro') ? (['mes'] as const) : []),
+      ...(hayCelda('provincia') ? (['provincia'] as const) : []),
+      ...(hayCelda('distrito') ? (['distrito'] as const) : []),
+      ...(hayCelda('comisaria') ? (['comisaria'] as const) : []),
+      ...(hayCelda('fecha_registro') ? (['fecha_registro'] as const) : []),
+      ...(hayCelda('fecha_siniestro') ? (['fecha_siniestro'] as const) : []),
+      ...(hayCelda('abogado') ? (['abogado'] as const) : []),
+      ...(hayCelda('cant_lesionados') ? (['cant_lesionados'] as const) : []),
+      ...(hayCelda('lesiones') || hayCelda('lesion_principal')
+        ? (['lesiones', 'lesion_principal'] as const)
+        : []),
+      ...(hayCelda('reserva_inicial') ? (['reserva_inicial'] as const) : []),
+      ...(hayCelda('gravedad') ? (['gravedad'] as const) : []),
+      ...(hayCelda('reserva_final') ? (['reserva_final'] as const) : []),
+      ...(hayCelda('ahorro') ? (['ahorro'] as const) : []),
+      ...(traeCierre ? (['fecha_cierre'] as const) : []),
+      ...(hayCelda('tiempo_cierre') || traeCierre ? (['tiempo_cierre'] as const) : []),
+      ...(hayCelda('sub_estado') ? (['sub_estado'] as const) : []),
+      ...(hayCelda('estado') || traeCierre ? (['estado'] as const) : []),
+      ...(hayCelda('placa_asegurado') ? (['placa_asegurado'] as const) : []),
+    ];
+
+    const patch: DriveUpdatePatch = {};
+    const cambios: string[] = [];
+    for (const campo of candidatos) {
+      const nuevo = fila[campo];
+      const actual = (existente as unknown as Record<string, unknown>)[campo];
+      if (mismoValor(nuevo, actual)) continue;
+      (patch as Record<string, unknown>)[campo] = nuevo;
+      cambios.push(`${CAMPO_LABEL[campo] ?? campo}: ${mostrar(actual)} → ${mostrar(nuevo)}`);
+    }
+
+    if (cambios.length === 0) {
+      sinCambios++;
+      continue;
+    }
+    actualizaciones.push({ id: existente.id, siniestro, estudio, patch, cambios });
   }
 
-  return { filas, duplicados, sinEstudio, errores, columnasIgnoradas: ignoradas };
+  return { filas, actualizaciones, sinCambios, sinEstudio, errores, columnasIgnoradas: ignoradas };
 }
 
 /* ---------------- Export ---------------- */
@@ -359,6 +497,7 @@ export async function exportDriveExcel(registros: DriveSiniestro[], nombreArchiv
   const XLSX = await import('xlsx');
   const datos = registros.map((r) => ({
     'SINIESTRO': r.siniestro,
+    'PLACA ASEGURADA': r.placa_asegurado ?? '',
     'AÑO': r.anio ?? '',
     'MES': r.mes ?? '',
     'PROVINCIA': r.provincia ?? '',
@@ -383,10 +522,10 @@ export async function exportDriveExcel(registros: DriveSiniestro[], nombreArchiv
   const ws = XLSX.utils.json_to_sheet(datos);
   // Anchos de columna razonables para lectura
   ws['!cols'] = [
-    { wch: 12 }, { wch: 6 }, { wch: 11 }, { wch: 14 }, { wch: 16 }, { wch: 16 },
-    { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 28 }, { wch: 22 },
-    { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
-    { wch: 22 }, { wch: 9 }, { wch: 20 },
+    { wch: 12 }, { wch: 10 }, { wch: 6 }, { wch: 11 }, { wch: 14 }, { wch: 16 },
+    { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 28 },
+    { wch: 22 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
+    { wch: 10 }, { wch: 22 }, { wch: 9 }, { wch: 20 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Siniestros');

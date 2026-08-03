@@ -12,6 +12,19 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-08-04',
+    fecha: '2026-08-04',
+    titulo: 'Informe de caso en el Drive',
+    items: [
+      'Nuevo formulario de caso: al agregar un siniestro al Drive ahora se pide el informe completo (fechas y horas, asesor, lugar, comisaría, causa, responsabilidad, placas, lesionados, montos, contactos, procesos y recomendación). El estudio y el abogado se toman de tu usuario.',
+      'Enviar el informe por correo: desde el detalle de cualquier caso (o apenas lo registras) se abre el correo ya redactado con el formato del informe. Lo que no tenga dato sale como "-".',
+      'N° de caso del estudio: si tu equipo numera sus informes (147, 148…), márcalo en el formulario y ese número va en el asunto. Si tu equipo no lo usa, déjalo sin marcar.',
+      'Los datos sensibles ya no se ven en la tabla: nombres de lesionados, diagnósticos, teléfonos y correos quedan dentro de "Ver detalle". En la tabla se agregó la placa del asegurado, y también se puede buscar por ella.',
+      'Importar Excel ahora actualiza: si el archivo trae casos que ya estaban registrados con datos distintos (por ejemplo cerrados que en la web figuran abiertos), se actualizan. Antes de importar te decimos cuántos son y qué cambia en cada uno.',
+      'Reserva inicial, reserva final, ahorro y gravedad ya no se piden al crear el caso: se completan después en la pestaña "Métrica legal" del detalle.',
+    ],
+  },
+  {
     id: '2026-08-03',
     fecha: '2026-08-03',
     titulo: 'Casos urgentes',

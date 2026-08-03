@@ -95,6 +95,18 @@ export function formatFechaCorta(fecha: string | Date): string {
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+/**
+ * Igual que `formatFechaCorta` pero para columnas `date` ('YYYY-MM-DD', sin hora).
+ * `new Date('2026-01-30')` se interpreta en UTC, así que en Perú (UTC-5) se vería
+ * como el 29. Aquí armamos la fecha en horario local para que no se corra un día.
+ */
+export function formatFechaSolo(iso: string): string {
+  const m = iso.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return formatFechaCorta(iso);
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function formatMoneda(monto: number | null, moneda: Moneda = 'PEN'): string {
   if (monto == null) return '—';
   return new Intl.NumberFormat('es-PE', {

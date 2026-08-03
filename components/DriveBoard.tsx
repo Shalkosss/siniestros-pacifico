@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { DriveSiniestro } from '@/lib/types';
 import { useUser } from './UserContext';
-import { cn, formatFechaCorta } from '@/lib/utils';
+import { cn, formatFechaSolo } from '@/lib/utils';
 import {
   DRIVE_ESTADOS,
   DRIVE_ESTUDIOS,
@@ -17,14 +17,14 @@ import {
   estudioDriveDe,
 } from '@/lib/drive';
 import {
-  claveDuplicado,
   exportDriveExcel,
+  indexarExistentes,
   parseDriveExcel,
   type DriveImportResult,
 } from '@/lib/driveExcel';
-
-const baseInput =
-  'w-full rounded-lg bg-card border border-white/[0.06] px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 transition focus:outline-none focus:bg-card-hover focus:border-[#06b6d4]';
+import { baseInput, FField } from './ui/FormField';
+import { DriveInformeModal } from './DriveInformeModal';
+import { DriveDetalleModal } from './DriveDetalleModal';
 
 const baseSelect =
   'rounded-lg bg-white/[0.03] border border-white/[0.06] px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-white/20';
@@ -41,6 +41,8 @@ export function DriveBoard() {
   const [agregando, setAgregando] = useState(false);
   const [importando, setImportando] = useState(false);
   const [exportando, setExportando] = useState(false);
+  /** Caso abierto en el detalle (ahí vive la info que la tabla no muestra) */
+  const [detalle, setDetalle] = useState<DriveSiniestro | null>(null);
 
   // Filtros
   const [filtroAnio, setFiltroAnio] = useState<string>('');
@@ -131,6 +133,9 @@ export function DriveBoard() {
         const q = busqueda.toLowerCase();
         const hay =
           r.siniestro.toLowerCase().includes(q) ||
+          (r.placa_asegurado ?? '').toLowerCase().includes(q) ||
+          (r.nro_caso ?? '').toLowerCase().includes(q) ||
+          (r.nro_caso_estudio ?? '').toLowerCase().includes(q) ||
           (r.abogado ?? '').toLowerCase().includes(q) ||
           (r.distrito ?? '').toLowerCase().includes(q) ||
           (r.lesion_principal ?? '').toLowerCase().includes(q);
@@ -255,7 +260,7 @@ export function DriveBoard() {
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" /></svg>
           <input
             type="text"
-            placeholder="Buscar código, abogado…"
+            placeholder="Buscar código, placa, abogado…"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             className="w-52 rounded-lg bg-white/[0.03] border border-white/[0.06] px-9 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-white/20"
@@ -285,19 +290,36 @@ export function DriveBoard() {
               esPacifico={esPacifico}
               mostrarAnio={!filtroAnio}
               onToggleFlag={toggleFlag}
+              onAbrirDetalle={setDetalle}
             />
           ))}
         </div>
       )}
 
       {agregando && (
-        <AgregarDriveModal
+        <DriveInformeModal
           estudioFijo={esPacifico ? null : estudioUsuario === '__ninguno__' ? null : estudioUsuario}
+          // El abogado se autocompleta con el usuario logueado (Pacífico lo escribe a mano).
+          abogadoFijo={esPacifico ? null : usuario?.nombre ?? null}
           creadoPor={usuario?.nombre ?? 'desconocido'}
+          usuario={usuario ?? null}
           onClose={() => setAgregando(false)}
           onCreated={() => {
             setAgregando(false);
             void cargar();
+          }}
+        />
+      )}
+
+      {detalle && (
+        <DriveDetalleModal
+          registro={detalle}
+          usuario={usuario ?? null}
+          puedeEditar={esPacifico || detalle.estudio === estudioUsuario}
+          onClose={() => setDetalle(null)}
+          onUpdated={(r) => {
+            setDetalle(r);
+            setRegistros((prev) => prev.map((x) => (x.id === r.id ? r : x)));
           }}
         />
       )}
@@ -326,12 +348,14 @@ function MesSection({
   esPacifico,
   mostrarAnio,
   onToggleFlag,
+  onAbrirDetalle,
 }: {
   mes: string;
   items: DriveSiniestro[];
   esPacifico: boolean;
   mostrarAnio: boolean;
   onToggleFlag: (r: DriveSiniestro, campo: 'flag_fallecido' | 'flag_unidad_retenida') => void;
+  onAbrirDetalle: (r: DriveSiniestro) => void;
 }) {
   const [abierto, setAbierto] = useState(true);
   const abiertos = items.filter((r) => r.estado === 'ABIERTO').length;
@@ -384,6 +408,7 @@ function MesSection({
               <tr className="border-t border-white/[0.06] text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                 <Th>Alertas</Th>
                 <Th>Siniestro</Th>
+                <Th>Placa</Th>
                 {mostrarAnio && <Th>Año</Th>}
                 <Th>F. registro</Th>
                 <Th>Distrito</Th>
@@ -396,6 +421,8 @@ function MesSection({
                 <Th>Sub estado</Th>
                 <Th>Estado</Th>
                 {esPacifico && <Th>Estudio</Th>}
+                <Th />
+
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
@@ -405,8 +432,10 @@ function MesSection({
                 return (
                 <tr
                   key={r.id}
+                  onClick={() => onAbrirDetalle(r)}
+                  title="Ver el informe completo del caso"
                   className={cn(
-                    'transition border-l-2',
+                    'transition border-l-2 cursor-pointer',
                     // Prioridad: fallecido (rojo fuerte) > unidad retenida (ámbar) > tinte por estado
                     fallecido
                       ? 'bg-red-500/[0.12] border-l-red-500 hover:bg-red-500/[0.18]'
@@ -444,8 +473,9 @@ function MesSection({
                       {retenida && <VehiculoIcon className="h-3.5 w-3.5 text-amber-400" />}
                     </span>
                   </Td>
+                  <Td className="font-mono text-slate-200">{r.placa_asegurado ?? '—'}</Td>
                   {mostrarAnio && <Td>{r.anio ?? '—'}</Td>}
-                  <Td>{r.fecha_registro ? formatFechaCorta(r.fecha_registro) : '—'}</Td>
+                  <Td>{r.fecha_registro ? formatFechaSolo(r.fecha_registro) : '—'}</Td>
                   <Td>{r.distrito ?? '—'}</Td>
                   <Td>{r.abogado ?? '—'}</Td>
                   <Td>{r.lesion_principal ?? '—'}</Td>
@@ -482,6 +512,9 @@ function MesSection({
                     </span>
                   </Td>
                   {esPacifico && <Td>{r.estudio}</Td>}
+                  <Td className="text-right text-slate-500">
+                    <span className="whitespace-nowrap text-[11px] font-medium">Ver detalle →</span>
+                  </Td>
                 </tr>
                 );
               })}
@@ -509,7 +542,11 @@ function FlagButton({
 }) {
   return (
     <button
-      onClick={onClick}
+      // La fila abre el detalle: el toggle de alerta no debe dispararlo.
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       title={titulo}
       className={cn(
         'grid h-6 w-6 place-items-center rounded-md transition',
@@ -548,258 +585,6 @@ function Td({ children, className }: { children?: React.ReactNode; className?: s
   return <td className={cn('px-3 py-2 whitespace-nowrap text-slate-300', className)}>{children}</td>;
 }
 
-/* ---------------- Modal Agregar ---------------- */
-
-function AgregarDriveModal({
-  estudioFijo,
-  creadoPor,
-  onClose,
-  onCreated,
-}: {
-  /** null = Pacífico elige el estudio; string = estudio fijo del abogado */
-  estudioFijo: string | null;
-  creadoPor: string;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [siniestro, setSiniestro] = useState('');
-  const [fechaRegistro, setFechaRegistro] = useState('');
-  const [fechaSiniestro, setFechaSiniestro] = useState('');
-  const [provincia, setProvincia] = useState('');
-  const [distrito, setDistrito] = useState('');
-  const [comisaria, setComisaria] = useState('');
-  const [abogado, setAbogado] = useState('');
-  const [cantLesionados, setCantLesionados] = useState('1');
-  const [lesiones, setLesiones] = useState('');
-  const [lesionPrincipal, setLesionPrincipal] = useState('');
-  const [reservaInicial, setReservaInicial] = useState('');
-  const [gravedad, setGravedad] = useState('Leve');
-  const [reservaFinal, setReservaFinal] = useState('');
-  const [ahorro, setAhorro] = useState('');
-  const [fechaCierre, setFechaCierre] = useState('');
-  const [subEstado, setSubEstado] = useState('');
-  const [estado, setEstado] = useState('ABIERTO');
-  const [estudio, setEstudio] = useState(estudioFijo ?? '');
-  const [error, setError] = useState<string | null>(null);
-  const [guardando, setGuardando] = useState(false);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!siniestro.trim()) { setError('Indica el código del siniestro.'); return; }
-    if (!fechaRegistro) { setError('Indica la fecha de registro.'); return; }
-    if (!lesionPrincipal) { setError('Selecciona la lesión principal.'); return; }
-    if (!subEstado) { setError('Selecciona el sub estado.'); return; }
-    if (!estudio) { setError('Selecciona el estudio.'); return; }
-    if (estado === 'CERRADO' && !fechaCierre) { setError('Un siniestro cerrado necesita fecha de cierre.'); return; }
-
-    setGuardando(true);
-
-    // Año y mes se derivan de la fecha de registro para mantener el formato del Excel.
-    const fr = new Date(fechaRegistro + 'T00:00:00');
-    const anio = fr.getFullYear();
-    const mes = DRIVE_MESES[fr.getMonth()];
-
-    // Tiempo de cierre en días (si está cerrado y hay ambas fechas)
-    let tiempoCierre: number | null = null;
-    if (estado === 'CERRADO' && fechaCierre) {
-      const fc = new Date(fechaCierre + 'T00:00:00');
-      tiempoCierre = Math.max(0, Math.round((fc.getTime() - fr.getTime()) / (1000 * 60 * 60 * 24)));
-    }
-
-    const { error: insErr } = await supabase.from('drive_siniestros').insert({
-      siniestro: siniestro.trim(),
-      anio,
-      mes,
-      provincia: provincia.trim() || null,
-      distrito: distrito.trim() || null,
-      comisaria: comisaria.trim() || null,
-      fecha_registro: fechaRegistro,
-      fecha_siniestro: fechaSiniestro || null,
-      abogado: abogado.trim() || null,
-      cant_lesionados: cantLesionados ? Number(cantLesionados) : null,
-      lesiones: lesiones.trim() || lesionPrincipal,
-      lesion_principal: lesionPrincipal,
-      reserva_inicial: reservaInicial ? Number(reservaInicial) : null,
-      gravedad,
-      reserva_final: reservaFinal ? Number(reservaFinal) : null,
-      ahorro: ahorro ? Number(ahorro) : null,
-      fecha_cierre: estado === 'CERRADO' && fechaCierre ? fechaCierre : null,
-      tiempo_cierre: tiempoCierre,
-      sub_estado: subEstado,
-      estado,
-      estudio,
-      creado_por: creadoPor,
-    });
-
-    setGuardando(false);
-    if (insErr) { setError('Error al guardar: ' + insErr.message); return; }
-    onCreated();
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm fade-in p-4 sm:p-8 overflow-y-auto"
-      onClick={onClose}
-    >
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-2xl rounded-2xl border border-white/10 bg-ink-800 shadow-2xl text-slate-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-          <div>
-            <h2 className="text-base font-semibold text-white">Agregar siniestro al Drive</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Mismo formato de la base consolidada. Año y mes se calculan de la fecha de registro.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition"
-            aria-label="Cerrar"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FField label="Código del siniestro *">
-              <input value={siniestro} onChange={(e) => setSiniestro(e.target.value)} className={cn(baseInput, 'font-mono')} placeholder="Ej. 1234567890" />
-            </FField>
-            <FField label="Estudio *">
-              {estudioFijo ? (
-                <input value={estudioFijo} disabled className={cn(baseInput, 'opacity-60 cursor-not-allowed')} />
-              ) : (
-                <select value={estudio} onChange={(e) => setEstudio(e.target.value)} className={baseInput}>
-                  <option value="" className="bg-ink-800">— Selecciona —</option>
-                  {DRIVE_ESTUDIOS.map((es) => (
-                    <option key={es} value={es} className="bg-ink-800">{es}</option>
-                  ))}
-                </select>
-              )}
-            </FField>
-            <FField label="Fecha de registro *">
-              <input type="date" value={fechaRegistro} onChange={(e) => setFechaRegistro(e.target.value)} className={baseInput} />
-            </FField>
-            <FField label="Fecha del siniestro">
-              <input type="date" value={fechaSiniestro} onChange={(e) => setFechaSiniestro(e.target.value)} className={baseInput} />
-            </FField>
-            <FField label="Provincia">
-              <input value={provincia} onChange={(e) => setProvincia(e.target.value)} className={baseInput} placeholder="Ej. LIMA" />
-            </FField>
-            <FField label="Distrito">
-              <input value={distrito} onChange={(e) => setDistrito(e.target.value)} className={baseInput} />
-            </FField>
-            <FField label="Comisaría">
-              <input value={comisaria} onChange={(e) => setComisaria(e.target.value)} className={baseInput} />
-            </FField>
-            <FField label="Abogado">
-              <input value={abogado} onChange={(e) => setAbogado(e.target.value)} className={baseInput} />
-            </FField>
-            <FField label="Cant. lesionados">
-              <input type="number" min={0} value={cantLesionados} onChange={(e) => setCantLesionados(e.target.value)} className={baseInput} />
-            </FField>
-            <FField label="Lesión principal *">
-              <select value={lesionPrincipal} onChange={(e) => setLesionPrincipal(e.target.value)} className={baseInput}>
-                <option value="" className="bg-ink-800">— Selecciona —</option>
-                {DRIVE_LESIONES.map((l) => (
-                  <option key={l} value={l} className="bg-ink-800">{l}</option>
-                ))}
-              </select>
-            </FField>
-            <FField label="Detalle de lesiones">
-              <input value={lesiones} onChange={(e) => setLesiones(e.target.value)} className={baseInput} placeholder="Si difiere de la principal" />
-            </FField>
-            <FField label="Gravedad *">
-              <select value={gravedad} onChange={(e) => setGravedad(e.target.value)} className={baseInput}>
-                {DRIVE_GRAVEDADES.map((g) => (
-                  <option key={g} value={g} className="bg-ink-800">{g}</option>
-                ))}
-              </select>
-            </FField>
-            <FField label="Reserva inicial (S/)">
-              <input type="number" step="0.01" value={reservaInicial} onChange={(e) => setReservaInicial(e.target.value)} className={baseInput} placeholder="0.00" />
-            </FField>
-            <FField label="Reserva final (S/)">
-              <input type="number" step="0.01" value={reservaFinal} onChange={(e) => setReservaFinal(e.target.value)} className={baseInput} placeholder="0.00" />
-            </FField>
-            <FField label="Ahorro (S/)">
-              <input type="number" step="0.01" value={ahorro} onChange={(e) => setAhorro(e.target.value)} className={baseInput} placeholder="0.00" />
-            </FField>
-            <FField label="Sub estado *">
-              <select value={subEstado} onChange={(e) => setSubEstado(e.target.value)} className={baseInput}>
-                <option value="" className="bg-ink-800">— Selecciona —</option>
-                {DRIVE_SUB_ESTADOS.map((s) => (
-                  <option key={s} value={s} className="bg-ink-800">{s}</option>
-                ))}
-              </select>
-            </FField>
-            <FField label="Estado *">
-              <select value={estado} onChange={(e) => setEstado(e.target.value)} className={baseInput}>
-                {DRIVE_ESTADOS.map((s) => (
-                  <option key={s} value={s} className="bg-ink-800">{s}</option>
-                ))}
-              </select>
-            </FField>
-            {estado === 'CERRADO' && (
-              <FField label="Fecha de cierre *">
-                <input type="date" value={fechaCierre} onChange={(e) => setFechaCierre(e.target.value)} className={baseInput} />
-              </FField>
-            )}
-          </div>
-
-          {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="flex gap-2 border-t border-white/[0.06] px-5 py-4">
-          <button
-            type="submit"
-            disabled={guardando}
-            className="inline-flex items-center rounded-lg bg-pago px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600 transition disabled:opacity-50"
-          >
-            {guardando ? 'Guardando…' : 'Agregar al Drive'}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex items-center rounded-lg border border-white/[0.08] px-4 py-2 text-sm font-medium text-slate-400 hover:bg-white/[0.03] hover:text-slate-200 transition"
-          >
-            Cancelar
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function FField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1.5">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
 /* ---------------- Modal Importar Excel ---------------- */
 
 function ImportarDriveModal({
@@ -833,12 +618,8 @@ function ImportarDriveModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose, guardando]);
 
-  // Claves estudio::siniestro ya presentes en la base, para omitir duplicados
-  const existentes = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of registrosExistentes) set.add(claveDuplicado(r.estudio, r.siniestro));
-    return set;
-  }, [registrosExistentes]);
+  // Casos ya registrados: los nuevos se insertan y los repetidos se actualizan.
+  const existentes = useMemo(() => indexarExistentes(registrosExistentes), [registrosExistentes]);
 
   async function analizar(buf: ArrayBuffer | string, estudioDef: string) {
     setAnalizando(true);
@@ -875,29 +656,52 @@ function ImportarDriveModal({
   }
 
   async function onImportar() {
-    if (!resultado || resultado.filas.length === 0 || guardando) return;
+    if (!resultado || guardando) return;
+    const totalNuevos = resultado.filas.length;
+    const totalCambios = resultado.actualizaciones.length;
+    if (totalNuevos + totalCambios === 0) return;
+
     setGuardando(true);
     setError(null);
+    let hechos = 0;
     const LOTE = 500;
     try {
-      for (let i = 0; i < resultado.filas.length; i += LOTE) {
+      // 1) Altas
+      for (let i = 0; i < totalNuevos; i += LOTE) {
         const { error: insErr } = await supabase
           .from('drive_siniestros')
           .insert(resultado.filas.slice(i, i + LOTE));
         if (insErr) throw new Error(insErr.message);
-        setProgreso(Math.min(resultado.filas.length, i + LOTE));
+        hechos = Math.min(totalNuevos, i + LOTE);
+        setProgreso(hechos);
+      }
+      // 2) Actualizaciones — una por caso, en tandas para no saturar la conexión.
+      const TANDA = 20;
+      for (let i = 0; i < totalCambios; i += TANDA) {
+        const tanda = resultado.actualizaciones.slice(i, i + TANDA);
+        const res = await Promise.all(
+          tanda.map((u) => supabase.from('drive_siniestros').update(u.patch).eq('id', u.id))
+        );
+        const fallo = res.find((r) => r.error);
+        if (fallo?.error) throw new Error(fallo.error.message);
+        hechos = totalNuevos + Math.min(totalCambios, i + TANDA);
+        setProgreso(hechos);
       }
       onImported();
     } catch (e) {
       setError(
         'Error al guardar: ' + (e instanceof Error ? e.message : String(e)) +
-        (progreso > 0 ? ` (se alcanzaron a guardar ${progreso} casos; corrige el archivo y vuelve a subirlo — los ya guardados se omitirán como duplicados)` : '')
+        (hechos > 0
+          ? ` (se alcanzaron a procesar ${hechos} casos; corrige el archivo y vuelve a subirlo — los ya guardados se detectarán como existentes)`
+          : '')
       );
       setGuardando(false);
     }
   }
 
   const listos = resultado?.filas.length ?? 0;
+  const aActualizar = resultado?.actualizaciones.length ?? 0;
+  const total = listos + aActualizar;
 
   return (
     <div
@@ -913,7 +717,8 @@ function ImportarDriveModal({
             <h2 className="text-base font-semibold text-white">Importar siniestros desde Excel</h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
               Sube el reporte mensual (.xlsx, .xls o .csv). Reconocemos las columnas automáticamente y
-              adaptamos los datos al formato de la base. Los casos ya registrados se omiten.
+              adaptamos los datos al formato de la base. Los casos nuevos se agregan y los que ya
+              estaban se actualizan con lo que diga el Excel.
             </p>
           </div>
           <button
@@ -971,12 +776,16 @@ function ImportarDriveModal({
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
-                  {listos} casos listos para importar
+                  {listos} casos nuevos
                 </span>
-                {resultado.duplicados.length > 0 && (
-                  <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-300"
-                        title={resultado.duplicados.slice(0, 20).join(', ')}>
-                    {resultado.duplicados.length} ya registrados (se omiten)
+                {aActualizar > 0 && (
+                  <span className="rounded-full bg-cyan-500/15 px-2.5 py-1 text-[11px] font-medium text-cyan-300">
+                    {aActualizar} casos ya registrados se actualizarán
+                  </span>
+                )}
+                {resultado.sinCambios > 0 && (
+                  <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-slate-400">
+                    {resultado.sinCambios} sin cambios
                   </span>
                 )}
                 {resultado.errores.length > 0 && (
@@ -1000,6 +809,29 @@ function ImportarDriveModal({
                   {resultado.errores.length > 5 && (
                     <p className="text-[11px] text-red-300/60">…y {resultado.errores.length - 5} más.</p>
                   )}
+                </div>
+              )}
+
+              {/* Casos existentes que el Excel va a pisar */}
+              {aActualizar > 0 && (
+                <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] p-3 space-y-2">
+                  <p className="text-[12px] font-medium text-cyan-200">
+                    Se detectaron {aActualizar} casos ya registrados con datos distintos. Manda el
+                    Excel: se van a actualizar. Las celdas vacías no borran lo que ya estaba.
+                  </p>
+                  <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                    {resultado.actualizaciones.slice(0, 12).map((u) => (
+                      <div key={u.id} className="text-[11.5px] leading-snug">
+                        <span className="font-mono font-semibold text-slate-200">{u.siniestro}</span>
+                        <span className="text-slate-500"> · {u.cambios.join(' · ')}</span>
+                      </div>
+                    ))}
+                    {aActualizar > 12 && (
+                      <p className="text-[11px] text-slate-500">
+                        …y {(aActualizar - 12).toLocaleString('es-PE')} casos más.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1045,13 +877,13 @@ function ImportarDriveModal({
           <button
             type="button"
             onClick={onImportar}
-            disabled={listos === 0 || guardando || analizando}
+            disabled={total === 0 || guardando || analizando}
             className="inline-flex items-center rounded-lg bg-pago px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600 transition disabled:opacity-50"
           >
             {guardando
-              ? `Guardando… ${progreso}/${listos}`
-              : listos > 0
-              ? `Importar ${listos.toLocaleString('es-PE')} casos`
+              ? `Guardando… ${progreso}/${total}`
+              : total > 0
+              ? `Importar ${listos.toLocaleString('es-PE')} y actualizar ${aActualizar.toLocaleString('es-PE')}`
               : 'Importar'}
           </button>
           <button
