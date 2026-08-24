@@ -1,6 +1,6 @@
 # Sistema de Siniestros — Pacífico Seguros
 
-> 📦 **Versión actual:** v4 — ver [CHANGELOG.md](CHANGELOG.md)
+> 📦 **Versión actual:** v13 — ver [CHANGELOG.md](CHANGELOG.md)
 > 🚀 **Deploy:** seguí [DEPLOY.md](DEPLOY.md) paso a paso
 > 📨 **Avisar al equipo:** templates en [TEMPLATE_COMMS.md](TEMPLATE_COMMS.md)
 
@@ -56,7 +56,8 @@ Abre http://localhost:3000.
 |--------------|----------|--------------------|
 | Rodrigo      | admin    | Mover cualquier siniestro a cualquier columna |
 | Jack         | terceros | Mueve pagos/reembolsos de **10 dígitos** en su etapa |
-| Christian    | terceros | Mueve pagos/reembolsos de **8 dígitos** en su etapa |
+| Christian    | terceros | Mueve pagos/reembolsos de **8 dígitos** que **no** son UBER |
+| Katty        | terceros | Mueve pagos/reembolsos **UBER de 8 dígitos** |
 | Rosita       | terceros | Mueve deducibles en su etapa ("Correo enviado") |
 | María Elena  | viewer   | KPIs + Admin (jefatura) |
 | Marcos       | viewer   | KPIs + Admin (jefatura) |
@@ -123,7 +124,7 @@ Modelo "Estef asigna, cada responsable mueve su parte" (opción 4 del brief):
 
 - **abogado** → crea siniestros, edita los suyos.
 - **admin** (Estef) → puede mover cualquier cosa a cualquier columna; también puede devolver etapas.
-- **terceros** (Jack/Christian/Rosita) → solo mueve siniestros que están en SU etapa (el sistema sabe quién es según los dígitos del código y el tipo).
+- **terceros** (Jack/Christian/Katty/Rosita) → solo mueve siniestros que están en SU etapa (el sistema sabe quién es según los dígitos del código, el tipo y la marca UBER).
 - **viewer** → solo lectura.
 
 Lógica en `lib/permissions.ts`.
@@ -140,6 +141,8 @@ Cuando un abogado crea un siniestro, después de guardarlo se le ofrece un paso 
 | **Pago/Reembolso** (10 díg → Jack) | rodrigochallcop, **jasalcedo** | mcisneros, maguerrero |
 | **Pago/Reembolso** (8 díg → Christian) | rodrigochallcop, **chcardenas** | mcisneros, maguerrero |
 
+> Los pagos UBER de 8 dígitos los gestiona **Katty** en el tablero. En el correo siguen yendo a Christian hasta que se cargue el correo corporativo de Katty (`lib/email.ts`).
+
 (Todos `@pacifico.com.pe` — definido en `lib/email.ts`.)
 
 **Implementación actual (default — cero setup):** `mailto:` link que abre el cliente de correo del usuario (Outlook / Gmail / Apple Mail) con todo prellenado. El abogado revisa y presiona enviar. Funciona desde Outlook móvil sin configuración adicional. Los PDFs van como URLs públicas en el cuerpo.
@@ -155,13 +158,15 @@ Cuando un abogado crea un siniestro, después de guardarlo se le ofrece un paso 
 
 ## Auth por equipo
 
-El sistema usa un password por equipo (no por persona). Cada equipo entra con su contraseña, y luego cada usuario elige su nombre del selector.
+El sistema usa un password por equipo. Cada equipo entra con su contraseña, y luego cada usuario elige su nombre del selector.
+
+Desde v13 también hay **contraseñas personales** (opcional, para quien la necesite): quien entra con la suya queda fijado a ese usuario — no aparece el selector "¿quién eres?" ni puede cambiarse por otra persona. Se configuran con env vars `USER_PASS_<NOMBRE>` y el usuario se registra en `USUARIOS_CON_LOGIN` (`lib/teams.ts`). Hoy la usa **Katty** (`USER_PASS_KATTY`); igual puede entrar con la clave del equipo Pacífico si se prefiere.
 
 ### Equipos
 
 | Slug | Equipo | Usuarios que ven |
 |------|--------|------------------|
-| `pacifico` | Pacífico — Equipo Legal | Rodrigo, Jack, Christian, Rosita, María Elena, Marcos |
+| `pacifico` | Pacífico — Equipo Legal | Rodrigo, Jack, Christian, Katty, Rosita, María Elena, Marcos |
 | `abeo` | Estudio Abeo | Oscar, Gonzalo, Diego, Juan |
 | `rvc` | RVC | Noelia, Micaela, Maritza, Pierina |
 | `jh` | JH | Joel, Constantino, Ruth |
@@ -227,9 +232,10 @@ Click **Deploy**. En ~1 minuto tienes la URL pública (ej: `https://siniestros-p
 
 ### 5. Comparte las contraseñas con cada equipo
 
-- Pacífico interno (Rodrigo + Jack + Christian + Rosita + jefes): `TEAM_PASS_PACIFICO`
+- Pacífico interno (Rodrigo + Jack + Christian + Katty + Rosita + jefes): `TEAM_PASS_PACIFICO`
 - Estudio Abeo: `TEAM_PASS_ABEO`
 - etc.
+- Contraseña personal de Katty: `USER_PASS_KATTY` (se la das solo a ella)
 
 Si una contraseña se filtra → cambias **solo esa env var en Vercel** + redeploy (1 click).
 

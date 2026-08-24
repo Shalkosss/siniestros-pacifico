@@ -7,6 +7,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { useUser } from './UserContext';
 import { debeCensurar } from '@/lib/permissions';
+import { esUber, UBER_BORDER, UBER_CARD, UBER_CHIP } from '@/lib/uber';
 
 export type CardMode = 'compacto' | 'detallado';
 
@@ -38,6 +39,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
   const censura = debeCensurar(usuario);
   const pausado = estaPausado(siniestro);
   const urgente = !!siniestro.urgente;
+  const uber = esUber(siniestro);
   const diasAbierto = useMemo(() => diasEfectivos(siniestro), [siniestro]);
   const urgencia = useMemo(() => colorPorDias(diasAbierto), [diasAbierto]);
   // El nombre del abogado (reembolso a abogado) no es dato personal de terceros: no se censura
@@ -63,6 +65,8 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         className={cn(
           'card-base rounded-lg border-l-[3px] overflow-hidden',
           borderByTipo[siniestro.tipo],
+          // UBER pinta la tarjeta de verde apagado; urgente/pausado siguen mandando encima.
+          uber && cn(UBER_BORDER, UBER_CARD),
           siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
           pausado && 'ring-1 ring-amber-400/50 bg-amber-500/[0.06]',
           urgente && 'ring-2 ring-red-500/70 bg-red-500/[0.07]',
@@ -74,12 +78,13 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
           onClick={onClick}
           {...dragProps}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
-          title={`${siniestro.codigo} · ${nombreMostrado} · ${pausado ? 'contador pausado' : `${diasAbierto}d abierto`}${urgente ? ' · URGENTE' : ''}${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
+          title={`${siniestro.codigo} · ${nombreMostrado} · ${pausado ? 'contador pausado' : `${diasAbierto}d abierto`}${urgente ? ' · URGENTE' : ''}${uber ? ' · UBER' : ''}${siniestro.es_pago_cuenta ? ' · pago en cuenta' : ''}${siniestro.correo_enviado ? ' · correo enviado' : ''}`}
         >
           {urgente && <UrgentDot />}
-          <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1">
+          <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex-1 truncate">
             {siniestro.codigo}
           </span>
+          {uber && <UberTag />}
           {pausado && <PauseDot />}
           {siniestro.es_pago_cuenta && <BankDot />}
           {siniestro.correo_enviado && <MailDot />}
@@ -96,6 +101,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
       className={cn(
         'card-base rounded-lg border-l-[3px] overflow-hidden',
         borderByTipo[siniestro.tipo],
+        uber && cn(UBER_BORDER, UBER_CARD),
         siniestro.es_pago_cuenta && 'ring-1 ring-teal-400/40 bg-teal-500/[0.05]',
         pausado && 'ring-1 ring-amber-400/50 bg-amber-500/[0.06]',
         urgente && 'ring-2 ring-red-500/70 bg-red-500/[0.07]',
@@ -115,6 +121,7 @@ export function SiniestroCard({ siniestro, mode, draggable, onClick }: Props) {
         <div className="flex items-start justify-between gap-2">
           <span className="font-mono text-sm font-semibold tracking-tight text-slate-100 flex items-center gap-1.5">
             {siniestro.codigo}
+            {uber && <UberTag />}
             {pausado && <PauseDot />}
             {siniestro.es_pago_cuenta && <BankDot />}
             {siniestro.correo_enviado && <MailDot />}
@@ -199,6 +206,21 @@ function DayBadge({ dias, urgencia, pausado }: { dias: number; urgencia: NivelUr
     >
       <span className="font-semibold">{dias}</span>
       <span className="opacity-70">d</span>
+    </span>
+  );
+}
+
+/** Etiqueta UBER — verde apagado, para distinguirla sin gritar sobre el fondo */
+function UberTag() {
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]',
+        UBER_CHIP
+      )}
+      title="Caso UBER"
+    >
+      Uber
     </span>
   );
 }

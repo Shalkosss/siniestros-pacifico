@@ -101,6 +101,9 @@ export function getDestinatarios(
     // pago / reembolso / valorizacion / info_poliza
     const esJack = s.codigo.length === 10;
     const analista = esJack ? JASALCEDO : CHCARDENAS;
+    // Nota: los UBER de 8 dígitos los gestiona Katty en el tablero (v13). Su
+    // correo corporativo todavía no está cargado; cuando lo esté, agregarlo
+    // como constante aquí y usarlo en lugar de CHCARDENAS para `s.es_uber`.
     to = [RODRIGO, analista];
   }
 
@@ -140,8 +143,10 @@ const TIPO_BODY_LABEL: Record<Siniestro['tipo'], string> = {
   info_poliza: 'Información de Póliza',
 };
 
-export function buildAsunto(s: Pick<Siniestro, 'tipo' | 'codigo'>): string {
-  const prefix = TIPO_PREFIJO[s.tipo] ?? 'SINIESTRO';
+export function buildAsunto(s: Pick<Siniestro, 'tipo' | 'codigo'> & Partial<Pick<Siniestro, 'es_uber'>>): string {
+  const base = TIPO_PREFIJO[s.tipo] ?? 'SINIESTRO';
+  // La marca UBER va en el asunto: cambia quién lo gestiona del lado de Pacífico.
+  const prefix = s.es_uber ? `${base} · UBER` : base;
   if (s.tipo === 'deducible') {
     return `[${prefix}] Siniestro ${s.codigo} — Cobro al asegurado`;
   }
@@ -174,7 +179,7 @@ export function buildCuerpo(s: Siniestro): string {
   const esReembolsoAbogado = !!s.reembolso_abogado;
 
   return [
-    `Actividad de ${tipoLabel}${esReembolsoAbogado ? ' (A ABOGADO)' : ''}${s.es_cheque ? ' (CHEQUE)' : ''}${s.es_pago_cuenta ? ' (PAGO EN CUENTA)' : ''}`,
+    `Actividad de ${tipoLabel}${s.es_uber ? ' (UBER)' : ''}${esReembolsoAbogado ? ' (A ABOGADO)' : ''}${s.es_cheque ? ' (CHEQUE)' : ''}${s.es_pago_cuenta ? ' (PAGO EN CUENTA)' : ''}`,
     '',
     `Código de siniestro: ${s.codigo}`,
     ...(variosBeneficiarios

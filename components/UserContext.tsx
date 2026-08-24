@@ -9,6 +9,11 @@ interface UserCtx {
   team: TeamSlug | null;
   teamLabel: string | null;
   usuario: Usuario | null;
+  /**
+   * v13 — la sesión entró con una contraseña personal: el usuario queda fijado
+   * y no se puede cambiar de persona sin cerrar sesión.
+   */
+  usuarioFijado: boolean;
   /** Usuarios disponibles para SELECCIONAR (filtrados al equipo) */
   usuariosEquipo: Usuario[];
   /** Todos los usuarios activos (sin filtrar). Para lookups, scope estudio, etc. */
@@ -44,7 +49,16 @@ function registrarAcceso(u: Usuario, team: TeamSlug | null) {
     });
 }
 
-export function UserProvider({ team, children }: { team: TeamSlug | null; children: ReactNode }) {
+export function UserProvider({
+  team,
+  usuarioFijado,
+  children,
+}: {
+  team: TeamSlug | null;
+  /** Nombre del usuario fijado por login personal (v13). null = lo elige el equipo. */
+  usuarioFijado?: string | null;
+  children: ReactNode;
+}) {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [usuario, setUsuarioState] = useState<Usuario | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,6 +79,15 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
     }
     setUsuarios(data ?? []);
 
+    // Login personal: la sesión ya dice quién es; no se ofrece el selector.
+    if (usuarioFijado) {
+      const fijo = (data ?? []).find((u) => u.nombre === usuarioFijado) ?? null;
+      setUsuarioState(fijo);
+      if (fijo) registrarAcceso(fijo, team);
+      setLoading(false);
+      return;
+    }
+
     // Solo restaurar el usuario del localStorage si pertenece al equipo actual
     const guardado = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     if (guardado && team) {
@@ -78,7 +101,7 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
       setUsuarioState(null);
     }
     setLoading(false);
-  }, [team]);
+  }, [team, usuarioFijado]);
 
   useEffect(() => {
     void cargarUsuarios();
@@ -86,6 +109,8 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
 
   const setUsuario = useCallback(
     (u: Usuario | null) => {
+      // Con login personal la persona no se cambia desde la interfaz.
+      if (usuarioFijado) return;
       setUsuarioState(u);
       if (typeof window !== 'undefined') {
         if (u) localStorage.setItem(STORAGE_KEY, u.nombre);
@@ -93,7 +118,7 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
       }
       if (u) registrarAcceso(u, team);
     },
-    [team]
+    [team, usuarioFijado]
   );
 
   const logout = useCallback(async () => {
@@ -115,6 +140,7 @@ export function UserProvider({ team, children }: { team: TeamSlug | null; childr
         team,
         teamLabel,
         usuario,
+        usuarioFijado: !!usuarioFijado,
         usuariosEquipo,
         usuarios,
         setUsuario,

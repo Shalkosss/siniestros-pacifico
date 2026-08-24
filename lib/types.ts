@@ -58,6 +58,9 @@ export interface Siniestro {
   pausado: boolean;
   // v11 — caso urgente (lo marca Pacífico). Se distingue visualmente en el tablero.
   urgente: boolean;
+  // v13 — categoría UBER dentro de pagos/reembolsos. Los de 8 dígitos los ve
+  // Katty; Christian se queda con los de 8 dígitos que no son UBER.
+  es_uber: boolean;
 }
 
 /** v8.1 — tipo de documento de identidad */

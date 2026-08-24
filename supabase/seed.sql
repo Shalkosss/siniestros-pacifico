@@ -8,6 +8,7 @@ insert into public.usuarios (nombre, rol) values
   ('Jack',        'terceros'),
   ('Christian',   'terceros'),
   ('Rosita',      'terceros'),
+  ('Katty',       'terceros'),
   ('María Elena', 'viewer'),
   ('Marcos',      'viewer')
 on conflict (nombre) do update

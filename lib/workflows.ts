@@ -1,8 +1,11 @@
 import type { Siniestro, TipoSiniestro } from './types';
 
+/** Datos mínimos del siniestro que necesita el workflow para repartir responsables. */
+export type SiniestroRuteo = Pick<Siniestro, 'codigo'> & Partial<Pick<Siniestro, 'es_uber'>>;
+
 export interface EtapaConfig {
   nombre: string;
-  responsableFn: (siniestro: Pick<Siniestro, 'codigo'>) => string;
+  responsableFn: (siniestro: SiniestroRuteo) => string;
 }
 
 /**
@@ -14,7 +17,9 @@ const WORKFLOW_PAGO: EtapaConfig[] = [
   { nombre: 'Solicitud recibida', responsableFn: () => 'Rodrigo' },
   {
     nombre: 'En proceso de firmas',
-    responsableFn: (s) => (s.codigo.length === 10 ? 'Jack' : 'Christian'),
+    // 10 dígitos → Jack. 8 dígitos → Christian, salvo los UBER que son de Katty (v13).
+    responsableFn: (s) =>
+      s.codigo.length === 10 ? 'Jack' : s.es_uber ? 'Katty' : 'Christian',
   },
   { nombre: 'En trama', responsableFn: () => 'Rodrigo' },
   { nombre: 'Pagado', responsableFn: () => 'Rodrigo' },
@@ -79,7 +84,7 @@ export function getEtapaAnterior(tipo: TipoSiniestro, estado: string): string | 
 export function getResponsableDeEtapa(
   tipo: TipoSiniestro,
   estado: string,
-  siniestro: Pick<Siniestro, 'codigo'>
+  siniestro: SiniestroRuteo
 ): string | null {
   const etapa = WORKFLOWS[tipo].find((e) => e.nombre === estado);
   return etapa ? etapa.responsableFn(siniestro) : null;

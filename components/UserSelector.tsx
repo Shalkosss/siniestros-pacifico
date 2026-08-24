@@ -20,7 +20,7 @@ const rolColors: Record<RolUsuario, string> = {
 };
 
 export function UserSelector() {
-  const { usuario, usuariosEquipo, teamLabel, setUsuario, loading, logout } = useUser();
+  const { usuario, usuarioFijado, usuariosEquipo, teamLabel, setUsuario, loading, logout } = useUser();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -37,6 +37,15 @@ export function UserSelector() {
   }
 
   if (!usuario) {
+    // Login personal sin usuario resuelto: la fila de `usuarios` no existe o
+    // está inactiva. Mejor decirlo que mostrar el selector de todo el equipo.
+    if (usuarioFijado) {
+      return (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-200">
+          Tu usuario no está activo. Avisa a Pacífico.
+        </div>
+      );
+    }
     return <SelectorModal usuarios={usuariosEquipo} teamLabel={teamLabel} onSelect={setUsuario} onLogout={logout} />;
   }
 
@@ -67,6 +76,13 @@ export function UserSelector() {
             </div>
           </div>
           <div className="my-1 border-t border-white/[0.06]" />
+          {usuarioFijado ? (
+            <div className="px-3 py-2 text-[11px] leading-snug text-slate-400">
+              Entraste con tu <span className="text-slate-200">contraseña personal</span>, así que la
+              sesión queda a tu nombre.
+            </div>
+          ) : (
+          <>
           <div className="px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-slate-500">
             Cambiar usuario
           </div>
@@ -93,21 +109,25 @@ export function UserSelector() {
               </button>
             ))}
           </div>
+          </>
+          )}
           <div className="mt-1 border-t border-white/[0.06] pt-1 space-y-0.5">
-            <button
-              onClick={() => {
-                setUsuario(null);
-                setOpen(false);
-              }}
-              className="w-full rounded-lg px-2 py-1.5 text-left text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            >
-              Cerrar sesión de usuario
-            </button>
+            {!usuarioFijado && (
+              <button
+                onClick={() => {
+                  setUsuario(null);
+                  setOpen(false);
+                }}
+                className="w-full rounded-lg px-2 py-1.5 text-left text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
+              >
+                Cerrar sesión de usuario
+              </button>
+            )}
             <button
               onClick={() => { void logout(); }}
               className="w-full rounded-lg px-2 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/10"
             >
-              Cambiar de equipo
+              {usuarioFijado ? 'Cerrar sesión' : 'Cambiar de equipo'}
             </button>
           </div>
         </div>

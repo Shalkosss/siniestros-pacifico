@@ -64,6 +64,8 @@ export interface DriveImportResult {
   sinCambios: number;
   /** Filas sin estudio identificable (solo puede pasar para Pacífico sin default) */
   sinEstudio: number;
+  /** Filas descartadas porque la columna SINIESTRO no traía un código (texto, notas…) */
+  omitidasSinCodigo: number;
   /** Errores por fila (fila de Excel → motivo) */
   errores: string[];
   /** Encabezados del Excel que no se pudieron mapear (informativo) */
@@ -217,6 +219,47 @@ function toStr(v: unknown): string | null {
   return s === '' ? null : s;
 }
 
+/* ---------------- Validación del código de siniestro ---------------- */
+
+/**
+ * Un número de siniestro es un identificador corto y compacto: dígitos, a veces
+ * con guiones o barras ("1001436981", "442783", "2026-0451"). Nunca es una frase.
+ *
+ * Esto importa porque los reportes de los estudios traen, debajo o al costado
+ * del cuadro, filas del informe con textos largos ("Av. Sinchi Roca y Av.
+ * Jamaica, Comas.", "PLACA DEL VEHÍCULO TERCERO 1: SIN PLACA…"). Sin este
+ * filtro, esas filas entraban al Drive como si fueran casos.
+ */
+const CODIGO_VALIDO = /^[A-Za-z0-9][A-Za-z0-9._/-]{2,24}$/;
+
+export function normalizarCodigoSiniestro(valor: string): string | null {
+  let s = valor.trim();
+  if (!s) return null;
+  // Excel a veces entrega el número como "1001436981.0" o en notación científica.
+  const num = Number(s);
+  if (/^\d+(\.0+)?$/.test(s) && isFinite(num)) s = String(Math.trunc(num));
+  // "1001 436 981" → "1001436981" (solo si al juntar queda todo numérico)
+  if (/\s/.test(s)) {
+    const junto = s.replace(/\s+/g, '');
+    if (/^\d+$/.test(junto)) s = junto;
+    else return null; // una frase con espacios no es un código
+  }
+  if (!CODIGO_VALIDO.test(s)) return null;
+  // Tiene que tener al menos un dígito: descarta encabezados repetidos y textos.
+  if (!/\d/.test(s)) return null;
+  return s;
+}
+
+/** ¿Este texto guardado en la base parece un número de siniestro? */
+export function esCodigoSiniestroValido(valor: string | null | undefined): boolean {
+  return !!valor && normalizarCodigoSiniestro(valor) !== null;
+}
+
+/** Recorta un texto largo para mostrarlo dentro de un mensaje de error. */
+function recorte(v: string, max = 42): string {
+  return v.length > max ? `${v.slice(0, max)}…` : v;
+}
+
 /* ---------------- Parse del Excel ---------------- */
 
 interface ParseOptions {
@@ -298,7 +341,7 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) {
     return {
-      filas: [], actualizaciones: [], sinCambios: 0, sinEstudio: 0,
+      filas: [], actualizaciones: [], sinCambios: 0, sinEstudio: 0, omitidasSinCodigo: 0,
       errores: ['El archivo no tiene hojas.'], columnasIgnoradas: [],
     };
   }
@@ -326,7 +369,7 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
 
   if (headerIdx === -1) {
     return {
-      filas: [], actualizaciones: [], sinCambios: 0, sinEstudio: 0,
+      filas: [], actualizaciones: [], sinCambios: 0, sinEstudio: 0, omitidasSinCodigo: 0,
       errores: ['No se encontró la fila de encabezados. El Excel debe tener una columna con el N° de siniestro (ej. "SINIESTRO") y al menos otras 2 columnas reconocibles (MES, ABOGADO, LESIONES, etc.).'],
       columnasIgnoradas: [],
     };
@@ -337,6 +380,7 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
   const errores: string[] = [];
   let sinCambios = 0;
   let sinEstudio = 0;
+  let omitidasSinCodigo = 0;
   const vistosEnArchivo = new Set<string>();
 
   for (let i = headerIdx + 1; i < matriz.length; i++) {
@@ -348,9 +392,20 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
       if (campo) raw[campo] = cells[j];
     });
 
-    const siniestro = toStr(raw.siniestro);
+    const crudo = toStr(raw.siniestro);
     const filaExcel = i + 1; // 1-indexed como en Excel
-    if (!siniestro) { errores.push(`Fila ${filaExcel}: sin código de siniestro.`); continue; }
+    if (!crudo) { errores.push(`Fila ${filaExcel}: sin código de siniestro.`); continue; }
+
+    // Filas del informe / notas al pie que caen bajo la columna SINIESTRO: se
+    // omiten en vez de entrar al Drive como casos fantasma.
+    const siniestro = normalizarCodigoSiniestro(crudo);
+    if (!siniestro) {
+      omitidasSinCodigo++;
+      errores.push(
+        `Fila ${filaExcel}: "${recorte(crudo)}" no es un número de siniestro — se omite.`
+      );
+      continue;
+    }
 
     // Estudio: forzado (abogados) > columna del Excel > default elegido
     let estudio: string | null = null;
@@ -487,7 +542,15 @@ export async function parseDriveExcel(buffer: ArrayBuffer | string, opts: ParseO
     actualizaciones.push({ id: existente.id, siniestro, estudio, patch, cambios });
   }
 
-  return { filas, actualizaciones, sinCambios, sinEstudio, errores, columnasIgnoradas: ignoradas };
+  return {
+    filas,
+    actualizaciones,
+    sinCambios,
+    sinEstudio,
+    omitidasSinCodigo,
+    errores,
+    columnasIgnoradas: ignoradas,
+  };
 }
 
 /* ---------------- Export ---------------- */

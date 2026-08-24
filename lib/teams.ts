@@ -50,3 +50,37 @@ export function usuariosDeEquipo(usuarios: Usuario[], teamSlug: TeamSlug | null)
 export function envKeyParaPassword(slug: TeamSlug): string {
   return `TEAM_PASS_${slug.toUpperCase()}`;
 }
+
+/**
+ * v13 — Usuarios con contraseña personal.
+ *
+ * Además de la contraseña compartida del equipo, estos usuarios tienen la suya.
+ * Al entrar con ella, la sesión queda fijada a ese usuario: no aparece el
+ * selector de "¿quién eres?" ni se puede cambiar de persona sin cerrar sesión.
+ * La contraseña vive en una env var del servidor (nunca en la base ni en el
+ * cliente), igual que las de equipo.
+ */
+export interface UsuarioConLogin {
+  nombre: string;
+  team: TeamSlug;
+}
+
+export const USUARIOS_CON_LOGIN: UsuarioConLogin[] = [
+  { nombre: 'Katty', team: 'pacifico' },
+];
+
+/** Nombre de la env var con la contraseña personal de un usuario */
+export function envKeyParaUsuario(nombre: string): string {
+  const slug = nombre
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_');
+  return `USER_PASS_${slug}`;
+}
+
+/** ¿Este nombre corresponde a un usuario con login propio? */
+export function getUsuarioConLogin(nombre: string | null | undefined): UsuarioConLogin | null {
+  if (!nombre) return null;
+  return USUARIOS_CON_LOGIN.find((u) => u.nombre === nombre) ?? null;
+}

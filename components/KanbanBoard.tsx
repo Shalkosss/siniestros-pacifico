@@ -22,7 +22,13 @@ import { cn, diasDesde } from '@/lib/utils';
 import { useUser } from './UserContext';
 import { puedeMover } from '@/lib/permissions';
 import { aplicarScope, scopeAmplio, scopeDefault, scopesDisponibles, type ScopeMode } from '@/lib/scope';
-import { aplicarVistaPredeterminada, tieneVistaPredeterminada } from '@/lib/vistas';
+import {
+  aplicarVistaPredeterminada,
+  tieneVistaEstricta,
+  tieneVistaPredeterminada,
+  VISTA_DESCRIPCION,
+} from '@/lib/vistas';
+import { esUber, UBER_ACCENT } from '@/lib/uber';
 import { buildComposeUrl, buildEmailGestion, type EmailProvider } from '@/lib/email';
 
 interface Props {
@@ -33,9 +39,13 @@ interface Props {
 // Orden final: Pagos → Deducibles → Valorizaciones → Info Póliza → Reembolsos (al final)
 const TIPOS_ORDEN: TipoSiniestro[] = ['pago', 'deducible', 'valorizacion', 'info_poliza', 'reembolso'];
 
-const TIPO_CHIPS: { id: TipoSiniestro | 'todos'; label: string; dot: string }[] = [
+/** 'uber' no es un tipo: es la categoría UBER dentro de pagos/reembolsos (v13). */
+type FiltroTipo = TipoSiniestro | 'todos' | 'uber';
+
+const TIPO_CHIPS: { id: FiltroTipo; label: string; dot: string }[] = [
   { id: 'todos',        label: 'Todos',          dot: 'bg-slate-500' },
   { id: 'pago',         label: 'Pagos',          dot: 'bg-[#06b6d4]' },
+  { id: 'uber',         label: 'Uber',           dot: `bg-[${UBER_ACCENT}]` },
   { id: 'deducible',    label: 'Deducibles',     dot: 'bg-[#f59e0b]' },
   { id: 'valorizacion', label: 'Valorizaciones', dot: 'bg-[#10b981]' },
   { id: 'info_poliza',  label: 'Info Póliza',    dot: 'bg-[#ec4899]' },
@@ -78,7 +88,7 @@ const VISTA_STORAGE_KEY = 'pacifico:vista-predeterminada';
 export function KanbanBoard({ modoHistorico = false }: Props) {
   const { usuario, usuarios } = useUser();
 
-  const [filtroTipo, setFiltroTipo] = useState<TipoSiniestro | 'todos'>('todos');
+  const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>('todos');
   const [siniestros, setSiniestros] = useState<Siniestro[]>([]);
   const [movimientos, setMovimientos] = useState<SiniestroMovimiento[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -180,12 +190,15 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
   );
 
   const tieneVista = tieneVistaPredeterminada(usuario);
+  // Katty y Christian no comparten cartera: su vista no se puede desactivar.
+  const vistaEstricta = tieneVistaEstricta(usuario);
 
-  // Aplica la vista predeterminada del usuario (si la tiene y está activada).
+  // Aplica la vista del usuario (siempre si es estricta; si no, según el toggle).
   const siniestrosEnVista = useMemo(() => {
-    if (!tieneVista || !vistaPropia) return siniestrosEnScope;
+    if (!tieneVista) return siniestrosEnScope;
+    if (!vistaEstricta && !vistaPropia) return siniestrosEnScope;
     return aplicarVistaPredeterminada(siniestrosEnScope, usuario);
-  }, [siniestrosEnScope, tieneVista, vistaPropia, usuario]);
+  }, [siniestrosEnScope, tieneVista, vistaEstricta, vistaPropia, usuario]);
 
   const siniestrosTemporal = useMemo(() => {
     if (modoHistorico) return siniestrosEnVista;
@@ -198,6 +211,8 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
 
   const siniestrosFiltrados = useMemo(() => {
     return siniestrosTemporal.filter((s) => {
+      // UBER es transversal a pagos y reembolsos: filtra casos, no secciones.
+      if (filtroTipo === 'uber' && !esUber(s)) return false;
       if (filtroSolicitante && s.solicitante !== filtroSolicitante) return false;
       if (filtroAsignado && s.asignado_a !== filtroAsignado) return false;
       if (busqueda) {
@@ -211,11 +226,13 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
       }
       return true;
     });
-  }, [siniestrosTemporal, filtroSolicitante, filtroAsignado, busqueda]);
+  }, [siniestrosTemporal, filtroTipo, filtroSolicitante, filtroAsignado, busqueda]);
 
   // Qué tipos renderizamos como secciones
   const tiposARenderizar: TipoSiniestro[] = useMemo(() => {
     if (filtroTipo === 'todos') return TIPOS_ORDEN;
+    // Con el filtro UBER se muestran las secciones donde puede haber UBER.
+    if (filtroTipo === 'uber') return ['pago', 'reembolso'];
     return [filtroTipo];
   }, [filtroTipo]);
 
@@ -300,11 +317,19 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         <ChipGroup>
           {TIPO_CHIPS.map((c) => {
-            const count = c.id === 'todos' ? siniestrosEnVista.length : siniestrosEnVista.filter((s) => s.tipo === c.id).length;
+            const count =
+              c.id === 'todos'
+                ? siniestrosEnVista.length
+                : c.id === 'uber'
+                ? siniestrosEnVista.filter((s) => esUber(s)).length
+                : siniestrosEnVista.filter((s) => s.tipo === c.id).length;
             const active = filtroTipo === c.id;
             return (
               <Chip key={c.id} active={active} onClick={() => setFiltroTipo(c.id)}>
-                <span className={cn('h-1.5 w-1.5 rounded-full', c.dot)} />
+                <span
+                  className={cn('h-1.5 w-1.5 rounded-full', c.id !== 'uber' && c.dot)}
+                  style={c.id === 'uber' ? { background: UBER_ACCENT } : undefined}
+                />
                 {c.label}
                 <ChipCount active={active}>{count}</ChipCount>
               </Chip>
@@ -367,8 +392,20 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
         )}
 
         <div className="ml-auto flex items-center gap-4 text-[11px] font-medium">
-          {/* Toggle vista predeterminada (Jack/Rosa/Christian) */}
-          {tieneVista && (
+          {/* Vista estricta: se informa el alcance, no se puede soltar */}
+          {vistaEstricta && usuario && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.04] px-2 py-1 text-slate-400"
+              title={`Tu tablero muestra: ${VISTA_DESCRIPCION[usuario.nombre] ?? 'tus casos'}`}
+            >
+              <svg className="h-3 w-3 text-slate-500" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 2a4 4 0 00-4 4v2H5a1 1 0 00-1 1v7a1 1 0 001 1h10a1 1 0 001-1V9a1 1 0 00-1-1h-1V6a4 4 0 00-4-4zm2 6V6a2 2 0 10-4 0v2h4z" clipRule="evenodd" />
+              </svg>
+              {VISTA_DESCRIPCION[usuario.nombre] ?? 'Mi cartera'}
+            </span>
+          )}
+          {/* Toggle vista predeterminada (Jack / Rosita) */}
+          {tieneVista && !vistaEstricta && (
             <div className="inline-flex rounded-md bg-white/[0.03] border border-white/[0.06] p-0.5">
               <button
                 onClick={() => setVistaPropia(true)}
@@ -376,7 +413,11 @@ export function KanbanBoard({ modoHistorico = false }: Props) {
                   'rounded px-2 py-1 transition',
                   vistaPropia ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
                 )}
-                title="Ver solo los casos de mi vista"
+                title={
+                  usuario && VISTA_DESCRIPCION[usuario.nombre]
+                    ? `Mi vista: ${VISTA_DESCRIPCION[usuario.nombre]}`
+                    : 'Ver solo los casos de mi vista'
+                }
               >
                 Mi vista
               </button>

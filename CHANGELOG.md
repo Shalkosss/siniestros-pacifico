@@ -4,7 +4,29 @@ Notas de cambios por versión. Formato basado en [Keep a Changelog](https://keep
 
 ---
 
-## v12 — Informe de caso en el Drive (actual)
+## v13 — UBER, Katty, autoguardado y resumen del Drive (actual)
+
+**Migración requerida:** `supabase/migration_v13.sql` (columna `es_uber`, usuaria Katty, reparto de UBER a Katty y limpieza de filas basura del Drive)
+
+**Config requerida:** `USER_PASS_KATTY` en las variables de entorno (contraseña personal de Katty).
+
+### Nuevo
+- **Autoguardado del formulario** ([`SiniestroForm.tsx`](components/SiniestroForm.tsx)): lo que se va llenando se guarda en el navegador con cada tecla. Si se cierra la pestaña, se corta la luz o se suspende el equipo, al volver está todo ahí con un aviso ("Recuperamos lo que estabas llenando hace 20 min") y un botón para empezar de cero. Los adjuntos hay que volver a elegirlos: el navegador no permite guardarlos.
+- **Categoría UBER** ([`lib/uber.ts`](lib/uber.ts), `es_uber`): marca dentro de Pagos y Reembolsos. Se distingue en el tablero con verde apagado (sage `#6f9c7e`, elegido para que resalte sobre el fondo sin ser chillón): borde izquierdo, tinte de fondo y etiqueta "Uber" en la tarjeta. Chip de filtro "Uber" en el tablero y marca en el asunto del correo (`[PAGO · UBER]`).
+- **Reparto de UBER** ([`lib/workflows.ts`](lib/workflows.ts), [`lib/vistas.ts`](lib/vistas.ts)): en "En proceso de firmas", los de 10 dígitos siguen siendo de Jack y los de 8 se reparten — UBER a **Katty**, el resto a **Christian**. Las vistas de Katty y Christian pasan a ser **estrictas**: no comparten cartera y no tienen el toggle "Todo Pacífico" (Jack y Rosita lo conservan).
+- **Usuaria Katty** (rol terceros) con **contraseña personal** ([`lib/teams.ts`](lib/teams.ts), [`lib/auth-edge.ts`](lib/auth-edge.ts)): además del login por equipo, ahora hay contraseñas por usuario en variables de entorno (`USER_PASS_<NOMBRE>`). Quien entra con la suya queda fijado a ese usuario: no aparece el selector "¿quién eres?" ni puede cambiarse por otra persona. Las cookies de sesión ya emitidas se siguen aceptando.
+- **Resumen de abiertos y cerrados en el Drive** ([`DriveResumen.tsx`](components/DriveResumen.tsx)): panel con el total de casos, abiertos, cerrados y % de cierre del periodo (este mes / 3 / 6 / 12 meses / todo), más el desglose en barras. Se alterna entre **por abogado** y **por estudio** con un toggle — ningún corte viene fijo. Los abogados ven el suyo; Pacífico ve todos. Se puede ocultar con el botón "Resumen".
+- **Limpieza de filas basura del Drive** ([`DriveBoard.tsx`](components/DriveBoard.tsx)): el Drive detecta las filas que no son casos, avisa cuántas son, muestra ejemplos y las borra tras confirmar (solo Pacífico).
+
+### Cambios
+- **Valorización se hace desde el Drive** ([`SiniestroForm.tsx`](components/SiniestroForm.tsx)): la opción sigue junto a Pago y Reembolso, pero ya no crea una tarjeta en el tablero — explica el flujo (buscar el SV en el Drive y agregarlo ahí) y lleva al Drive con un botón. De paso desaparece el error `invalid input value for enum tipo_siniestro: "valorizacion"` que salía al crear en bases sin la migración v5.
+- **El detalle del siniestro ahora edita todo** ([`SiniestroModal.tsx`](components/SiniestroModal.tsx)): además de código, monto, nombre y notas, se corrigen el **tipo** (mueve la tarjeta de sección y recalcula el responsable), el tipo de documento (DNI/CE), UBER, cheque con sus datos, pago en cuenta y reembolso a abogado. Los cambios de tipo, código y UBER quedan registrados en el historial del caso.
+- **La importación de Excel ya no mete texto como si fueran casos** ([`lib/driveExcel.ts`](lib/driveExcel.ts)): valida que el número de siniestro sea un código (`1001436981`, `442783`, `2026-0451`) y descarta las líneas del informe que caían bajo esa columna — direcciones, "PLACA DEL VEHÍCULO TERCERO 1: SIN PLACA…", encabezados repetidos. Antes del import se avisa cuántas filas se omiten y por qué. También normaliza códigos que Excel devuelve como `1001436981.0` o partidos en grupos.
+- **Tabla del Drive más limpia**: las celdas de texto largo se recortan con tooltip en vez de estirar la fila, el encabezado queda fijo al hacer scroll y cada mes tiene su propio scroll.
+
+---
+
+## v12 — Informe de caso en el Drive
 
 **Migración requerida:** `supabase/migration_v12.sql` (columnas del informe: identificadores, horas, asesor, placas, `lesionados` y `contactos` en jsonb, montos, procesos, observaciones)
 

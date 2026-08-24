@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Beneficiario, Moneda, Siniestro, SiniestroMovimiento, TipoDocumento, Usuario } from '@/lib/types';
+import type {
+  Beneficiario,
+  Moneda,
+  Siniestro,
+  SiniestroMovimiento,
+  TipoDocumento,
+  TipoSiniestro,
+  Usuario,
+} from '@/lib/types';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { useUser } from './UserContext';
 import { Button } from './ui/Button';
@@ -16,7 +24,8 @@ import {
   puedeEditarCampos,
   puedeSubirPDF,
 } from '@/lib/permissions';
-import { esEtapaFinal, getResponsableDeEtapa } from '@/lib/workflows';
+import { esEtapaFinal, getEtapas, getResponsableDeEtapa } from '@/lib/workflows';
+import { admiteUber, esUber, UBER_ACCENT, UBER_CHIP, UBER_TEXT } from '@/lib/uber';
 import {
   buildAsunto,
   buildComposeUrl,
@@ -65,6 +74,73 @@ const dotByColor: Record<'verde' | 'amarillo' | 'rojo', string> = {
   rojo: 'bg-red-400',
 };
 
+/** Interruptor de una línea para las sub-opciones del siniestro en modo edición */
+function ToggleLinea({
+  activo,
+  onToggle,
+  titulo,
+  detalle,
+  color,
+  plano,
+}: {
+  activo: boolean;
+  onToggle: () => void;
+  titulo: string;
+  detalle: string;
+  color: 'cyan' | 'teal' | 'violeta' | 'uber';
+  /** Sin marco propio (para anidarlo dentro de otro bloque) */
+  plano?: boolean;
+}) {
+  const marcoActivo: Record<string, string> = {
+    cyan: 'border-cyan-500/40 bg-cyan-500/[0.06]',
+    teal: 'border-teal-500/40 bg-teal-500/[0.06]',
+    violeta: 'border-violet-500/40 bg-violet-500/[0.06]',
+    uber: 'border-[rgba(111,156,126,0.4)] bg-[rgba(111,156,126,0.07)]',
+  };
+  const cajaActiva: Record<string, string> = {
+    cyan: 'border-cyan-500 bg-cyan-500',
+    teal: 'border-teal-500 bg-teal-500',
+    violeta: 'border-violet-500 bg-violet-500',
+    uber: 'border-transparent',
+  };
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={activo}
+      onClick={onToggle}
+      className={cn(
+        'flex w-full items-start gap-2.5 text-left select-none transition',
+        !plano && 'rounded-lg border p-3',
+        !plano && (activo ? marcoActivo[color] : 'border-white/10 bg-white/[0.02] hover:bg-white/[0.04]')
+      )}
+    >
+      <span
+        className={cn(
+          'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
+          activo ? cajaActiva[color] : 'border-slate-600 bg-white/[0.04]'
+        )}
+        style={activo && color === 'uber' ? { background: UBER_ACCENT } : undefined}
+      >
+        {activo && (
+          <svg className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+          </svg>
+        )}
+      </span>
+      <span className="text-xs text-slate-300 leading-snug">
+        <span
+          className="font-medium text-slate-100"
+          style={color === 'uber' && activo ? { color: UBER_TEXT } : undefined}
+        >
+          {titulo}
+        </span>
+        <span className="block text-[11px] text-slate-500 mt-0.5">{detalle}</span>
+      </span>
+    </button>
+  );
+}
+
 const PencilIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) => (
   <svg className={className} viewBox="0 0 20 20" fill="currentColor">
     <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
@@ -95,6 +171,16 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const [dniTercero, setDniTercero] = useState(siniestro.dni_tercero ?? '');
   const [correoAsegurado, setCorreoAsegurado] = useState(siniestro.correo_asegurado ?? '');
   const [bensEdit, setBensEdit] = useState<BenEdit[]>(toBenEdit(siniestro.beneficiarios));
+  // v13 — el detalle ahora edita todo lo que se llenó al crear el siniestro.
+  const [tipoEdit, setTipoEdit] = useState<TipoSiniestro>(siniestro.tipo);
+  const [docTipoEdit, setDocTipoEdit] = useState<TipoDocumento>(siniestro.doc_tipo ?? 'DNI');
+  const [esUberEdit, setEsUberEdit] = useState(!!siniestro.es_uber);
+  const [esChequeEdit, setEsChequeEdit] = useState(!!siniestro.es_cheque);
+  const [chequeBancoEdit, setChequeBancoEdit] = useState(siniestro.cheque_banco ?? '');
+  const [chequePersonaEdit, setChequePersonaEdit] = useState(siniestro.cheque_persona ?? '');
+  const [chequeDniEdit, setChequeDniEdit] = useState(siniestro.cheque_dni ?? '');
+  const [esPagoCuentaEdit, setEsPagoCuentaEdit] = useState(!!siniestro.es_pago_cuenta);
+  const [reembolsoAbogadoEdit, setReembolsoAbogadoEdit] = useState(!!siniestro.reembolso_abogado);
   const [notaPausaInput, setNotaPausaInput] = useState(siniestro.nota_pausa ?? '');
   const [pausando, setPausando] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -113,6 +199,15 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
     setDniTercero(siniestro.dni_tercero ?? '');
     setCorreoAsegurado(siniestro.correo_asegurado ?? '');
     setBensEdit(toBenEdit(siniestro.beneficiarios));
+    setTipoEdit(siniestro.tipo);
+    setDocTipoEdit(siniestro.doc_tipo ?? 'DNI');
+    setEsUberEdit(!!siniestro.es_uber);
+    setEsChequeEdit(!!siniestro.es_cheque);
+    setChequeBancoEdit(siniestro.cheque_banco ?? '');
+    setChequePersonaEdit(siniestro.cheque_persona ?? '');
+    setChequeDniEdit(siniestro.cheque_dni ?? '');
+    setEsPagoCuentaEdit(!!siniestro.es_pago_cuenta);
+    setReembolsoAbogadoEdit(!!siniestro.reembolso_abogado);
     setNotaPausaInput(siniestro.nota_pausa ?? '');
     setEditMode(false);
     setConfirmandoBorrado(false);
@@ -147,7 +242,22 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
   const colorEtapa = colorPorDias(diasEnEtapaActual);
 
   const esVariosBens = (siniestro.beneficiarios?.length ?? 0) > 1;
-  const esReembolsoAbogado = !!siniestro.reembolso_abogado;
+  // En modo edición manda lo que se está editando; fuera de él, lo guardado.
+  const esReembolsoAbogado = editMode
+    ? tipoEdit === 'reembolso' && reembolsoAbogadoEdit
+    : !!siniestro.reembolso_abogado;
+  const uber = esUber(siniestro);
+
+  /** El cambio de tipo reubica la tarjeta: la etapa actual debe existir en el nuevo flujo. */
+  function etapaParaTipo(nuevoTipo: TipoSiniestro): string {
+    const etapas = getEtapas(nuevoTipo);
+    if (etapas.includes(siniestro.estado)) return siniestro.estado;
+    // Si no existe (deducible ↔ pago tienen etapas distintas), se conserva la
+    // posición relativa en el flujo.
+    const etapasViejas = getEtapas(siniestro.tipo);
+    const idx = etapasViejas.indexOf(siniestro.estado);
+    return etapas[Math.min(Math.max(idx, 0), etapas.length - 1)] ?? etapas[0];
+  }
 
   async function guardarCampos() {
     if (!canEdit) return;
@@ -157,9 +267,28 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
       return;
     }
 
+    const admitePagoCuenta = tipoEdit === 'pago' || tipoEdit === 'reembolso';
+    const esCheque = tipoEdit === 'pago' && esChequeEdit;
+    const pagoCuenta = admitePagoCuenta && esPagoCuentaEdit;
+    const marcaUber = admiteUber(tipoEdit) && esUberEdit;
+
+    if (esCheque && (!chequeBancoEdit.trim() || !chequePersonaEdit.trim() || !chequeDniEdit.trim())) {
+      alert('Para un cheque hace falta el banco, quién lo recoge y su DNI.');
+      return;
+    }
+
     const updates: Partial<Siniestro> = {
       notas: notas || null,
       moneda,
+      // Sub-opciones del pago
+      es_cheque: esCheque,
+      cheque_banco: esCheque ? chequeBancoEdit.trim() : null,
+      cheque_persona: esCheque ? chequePersonaEdit.trim() : null,
+      cheque_dni: esCheque ? chequeDniEdit.trim() : null,
+      es_pago_cuenta: pagoCuenta,
+      es_uber: marcaUber,
+      reembolso_abogado: tipoEdit === 'reembolso' ? reembolsoAbogadoEdit : false,
+      doc_tipo: docTipoEdit,
     };
 
     if (esVariosBens) {
@@ -184,31 +313,49 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
         updates.monto = bens.reduce((acc, b) => acc + b.monto, 0);
       }
       updates.asegurado_nombre = bens[0].nombre;
-      if (siniestro.tipo !== 'deducible') updates.dni_tercero = bens[0].dni || null;
+      if (tipoEdit !== 'deducible') updates.dni_tercero = bens[0].dni || null;
     } else {
       updates.monto = monto ? Number(monto) : null;
       updates.asegurado_nombre = aseguradoNombre || null;
-      if (siniestro.tipo !== 'deducible') updates.dni_tercero = dniTercero || null;
+      if (tipoEdit !== 'deducible') updates.dni_tercero = dniTercero || null;
       else updates.correo_asegurado = correoAsegurado || null;
     }
 
     const codigoCambiado = codigoNuevo !== siniestro.codigo;
-    if (codigoCambiado) {
-      updates.codigo = codigoNuevo;
-      // El responsable de la etapa depende de los dígitos (8 → Christian, 10 → Jack)
-      updates.asignado_a = getResponsableDeEtapa(siniestro.tipo, siniestro.estado, { codigo: codigoNuevo });
+    const tipoCambiado = tipoEdit !== siniestro.tipo;
+    const uberCambiado = marcaUber !== !!siniestro.es_uber;
+    if (codigoCambiado) updates.codigo = codigoNuevo;
+    if (tipoCambiado) {
+      updates.tipo = tipoEdit;
+      updates.estado = etapaParaTipo(tipoEdit);
+    }
+    // El responsable sale del flujo: depende del tipo, los dígitos (8 → Christian,
+    // 10 → Jack) y, dentro de los de 8, de si es UBER (→ Katty).
+    if (codigoCambiado || tipoCambiado || uberCambiado) {
+      updates.asignado_a = getResponsableDeEtapa(
+        tipoEdit,
+        updates.estado ?? siniestro.estado,
+        { codigo: codigoNuevo, es_uber: marcaUber }
+      );
     }
 
     setGuardando(true);
     const { error } = await supabase.from('siniestros').update(updates).eq('id', siniestro.id);
     if (error) { setGuardando(false); alert('Error: ' + error.message); return; }
-    if (codigoCambiado) {
+
+    // Los cambios estructurales quedan en el historial del caso.
+    const notasCambio = [
+      codigoCambiado ? `Código corregido: ${siniestro.codigo} → ${codigoNuevo}` : null,
+      tipoCambiado ? `Tipo cambiado: ${tipoLabel[siniestro.tipo]} → ${tipoLabel[tipoEdit]}` : null,
+      uberCambiado ? (marcaUber ? 'Marcado como UBER' : 'Ya no es UBER') : null,
+    ].filter(Boolean);
+    if (notasCambio.length > 0) {
       await supabase.from('siniestro_movimientos').insert({
         siniestro_id: siniestro.id,
         estado_anterior: siniestro.estado,
-        estado_nuevo: siniestro.estado,
+        estado_nuevo: updates.estado ?? siniestro.estado,
         movido_por: usuario?.nombre ?? 'sistema',
-        notas: `Código corregido: ${siniestro.codigo} → ${codigoNuevo}`,
+        notas: notasCambio.join(' · '),
       });
     }
     setGuardando(false);
@@ -428,6 +575,16 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
           <div className={cn('text-[10px] font-semibold uppercase tracking-[0.16em]', accentTextByTipo[siniestro.tipo])}>
             {tipoLabel[siniestro.tipo]}
             {siniestro.reembolso_abogado ? ' · a abogado' : ''}
+            {uber && (
+              <span
+                className={cn(
+                  'ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold normal-case tracking-normal',
+                  UBER_CHIP
+                )}
+              >
+                UBER
+              </span>
+            )}
             {siniestro.urgente && (
               <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2 py-0.5 text-[9px] font-bold text-red-300 ring-1 ring-red-500/40 normal-case tracking-normal">
                 <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor">
@@ -566,6 +723,15 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                       setDniTercero(siniestro.dni_tercero ?? '');
                       setCorreoAsegurado(siniestro.correo_asegurado ?? '');
                       setBensEdit(toBenEdit(siniestro.beneficiarios));
+                      setTipoEdit(siniestro.tipo);
+                      setDocTipoEdit(siniestro.doc_tipo ?? 'DNI');
+                      setEsUberEdit(!!siniestro.es_uber);
+                      setEsChequeEdit(!!siniestro.es_cheque);
+                      setChequeBancoEdit(siniestro.cheque_banco ?? '');
+                      setChequePersonaEdit(siniestro.cheque_persona ?? '');
+                      setChequeDniEdit(siniestro.cheque_dni ?? '');
+                      setEsPagoCuentaEdit(!!siniestro.es_pago_cuenta);
+                      setReembolsoAbogadoEdit(!!siniestro.reembolso_abogado);
                     }}
                   >
                     Cancelar
@@ -579,6 +745,36 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
 
             {editMode ? (
               <div className="space-y-3">
+                {/* Tipo — corregible: un pago mal registrado como reembolso se arregla aquí */}
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1.5">
+                    Tipo de siniestro
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(['pago', 'reembolso', 'deducible', 'info_poliza'] as TipoSiniestro[]).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setTipoEdit(t)}
+                        className={cn(
+                          'rounded-md border px-2.5 py-1 text-xs font-medium transition',
+                          tipoEdit === t
+                            ? 'border-white/25 bg-white/10 text-white'
+                            : 'border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-200'
+                        )}
+                      >
+                        {tipoLabel[t]}
+                      </button>
+                    ))}
+                  </div>
+                  {tipoEdit !== siniestro.tipo && (
+                    <p className="mt-1.5 text-[11px] text-amber-300/90">
+                      Al guardar, la tarjeta se mueve a la sección de {tipoLabel[tipoEdit]} (etapa
+                      "{etapaParaTipo(tipoEdit)}") y se recalcula el responsable.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2">
                     <Input
@@ -610,18 +806,49 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                   {(!censura || esReembolsoAbogado) && !esVariosBens && (
                     <>
                       <Input
-                        label={esReembolsoAbogado ? 'Abogado' : 'Asegurado / tercero'}
+                        label={
+                          esReembolsoAbogado
+                            ? 'Abogado'
+                            : tipoEdit === 'deducible'
+                            ? 'Asegurado'
+                            : 'Asegurado / tercero'
+                        }
                         value={aseguradoNombre}
                         onChange={(e) => setAseguradoNombre(e.target.value)}
                       />
-                      {siniestro.tipo === 'deducible' ? (
+                      {tipoEdit === 'deducible' ? (
                         <Input label="Correo" type="email" value={correoAsegurado} onChange={(e) => setCorreoAsegurado(e.target.value)} />
                       ) : esReembolsoAbogado ? null : (
-                        <Input
-                          label={siniestro.doc_tipo === 'CE' ? 'CE' : 'DNI'}
-                          value={dniTercero}
-                          onChange={(e) => setDniTercero(e.target.value)}
-                        />
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                              Documento
+                            </label>
+                            <div className="inline-flex rounded-md bg-white/[0.04] border border-white/[0.06] p-0.5">
+                              {(['DNI', 'CE'] as TipoDocumento[]).map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => setDocTipoEdit(t)}
+                                  className={cn(
+                                    'rounded px-1.5 py-0.5 text-[10px] font-medium transition',
+                                    docTipoEdit === t ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
+                                  )}
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <input
+                            value={dniTercero}
+                            onChange={(e) => setDniTercero(e.target.value)}
+                            maxLength={12}
+                            inputMode="numeric"
+                            placeholder={`N° de ${docTipoEdit}`}
+                            className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-white/25 tabular-nums"
+                          />
+                        </div>
                       )}
                     </>
                   )}
@@ -696,6 +923,81 @@ export function SiniestroModal({ siniestro, movimientos, onClose, onChanged }: P
                         </strong>
                       </span>
                     </div>
+                  </div>
+                )}
+
+                {/* Sub-opciones: lo que antes solo se podía elegir al crear */}
+                {tipoEdit === 'reembolso' && (
+                  <ToggleLinea
+                    activo={reembolsoAbogadoEdit}
+                    onToggle={() => setReembolsoAbogadoEdit((v) => !v)}
+                    titulo="Reembolso a un abogado"
+                    detalle="Se registra solo el nombre, sin documento."
+                    color="violeta"
+                  />
+                )}
+
+                {admiteUber(tipoEdit) && (
+                  <ToggleLinea
+                    activo={esUberEdit}
+                    onToggle={() => setEsUberEdit((v) => !v)}
+                    titulo="Caso UBER"
+                    detalle="Se distingue en el tablero. Los de 8 dígitos los gestiona Katty."
+                    color="uber"
+                  />
+                )}
+
+                {(tipoEdit === 'pago' || tipoEdit === 'reembolso') && (
+                  <ToggleLinea
+                    activo={esPagoCuentaEdit}
+                    onToggle={() => {
+                      setEsPagoCuentaEdit((v) => {
+                        const nuevo = !v;
+                        if (nuevo) setEsChequeEdit(false);
+                        return nuevo;
+                      });
+                    }}
+                    titulo="Pago en cuenta bancaria"
+                    detalle="Necesita la ficha de matrícula entre los adjuntos."
+                    color="teal"
+                  />
+                )}
+
+                {tipoEdit === 'pago' && (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-3">
+                    <ToggleLinea
+                      activo={esChequeEdit}
+                      onToggle={() => {
+                        setEsChequeEdit((v) => {
+                          const nuevo = !v;
+                          if (nuevo) setEsPagoCuentaEdit(false);
+                          return nuevo;
+                        });
+                      }}
+                      titulo="El pago es un cheque"
+                      detalle="Banco y quién lo recoge."
+                      color="cyan"
+                      plano
+                    />
+                    {esChequeEdit && (
+                      <div className="space-y-2.5 slide-in">
+                        <Input label="Banco" value={chequeBancoEdit} onChange={(e) => setChequeBancoEdit(e.target.value)} />
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input
+                            label="Persona que recoge"
+                            value={chequePersonaEdit}
+                            onChange={(e) => setChequePersonaEdit(e.target.value)}
+                          />
+                          <Input
+                            label="DNI de quien recoge"
+                            value={chequeDniEdit}
+                            onChange={(e) => setChequeDniEdit(e.target.value)}
+                            maxLength={12}
+                            inputMode="numeric"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

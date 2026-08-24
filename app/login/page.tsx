@@ -98,7 +98,7 @@ export default function LoginPage() {
           {/* Password */}
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1.5">
-              Contraseña del equipo
+              Contraseña
             </label>
             <input
               type="password"
@@ -124,8 +124,9 @@ export default function LoginPage() {
             {submitting ? 'Ingresando…' : 'Ingresar'}
           </button>
 
-          <p className="text-[11px] text-slate-500 text-center">
-            Si no sabes la contraseña, pídela al equipo de Pacífico.
+          <p className="text-[11px] text-slate-500 text-center leading-relaxed">
+            Usa la contraseña de tu equipo o, si tienes una personal, la tuya.
+            <span className="block">Si no la sabes, pídela al equipo de Pacífico.</span>
           </p>
         </form>
       </div>

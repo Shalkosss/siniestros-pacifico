@@ -12,6 +12,19 @@ export interface AppUpdate {
 
 export const APP_UPDATES: AppUpdate[] = [
   {
+    id: '2026-08-24',
+    fecha: '2026-08-24',
+    titulo: 'UBER en Pagos, autoguardado y resumen del Drive',
+    items: [
+      'El formulario ya no se pierde: lo que vas llenando en "Nuevo siniestro" se guarda solo, con cada tecla. Si se cierra la pestaña, se corta la luz o se suspende el equipo, al volver está todo ahí. Los archivos adjuntos sí hay que volver a elegirlos.',
+      'Ahora se puede editar todo después de crear: desde el detalle del siniestro se corrigen el tipo (si entró como pago y era reembolso), el número, el monto, DNI o CE, cheque, pago en cuenta, UBER y reembolso a abogado. Los cambios quedan en el historial del caso.',
+      'Categoría UBER en Pagos y Reembolsos: se marca al crear (o después, desde el detalle) y en el tablero se distingue en verde. Hay un filtro "Uber" arriba para ver solo esos. Los UBER de 8 dígitos los gestiona Katty; los demás de 8 dígitos siguen con Christian.',
+      'Valorizaciones: se hacen desde el Drive de Siniestros, sobre el SV que ya está ahí. Al elegir "Valorización" en el formulario te explicamos el paso a paso y te llevamos al Drive.',
+      'Resumen de abiertos y cerrados en el Drive: cuántos casos hay abiertos y cerrados en el periodo que elijas (este mes, 3, 6 o 12 meses) con el desglose en barras. Se puede alternar entre ver por abogado y ver por estudio.',
+      'Importar Excel dejó de meter basura: las líneas del informe que caían bajo la columna del número de siniestro (direcciones, placas de terceros) ya no entran como casos, y te avisamos cuántas se omitieron. Las que ya estaban se pueden limpiar desde el Drive.',
+    ],
+  },
+  {
     id: '2026-08-04',
     fecha: '2026-08-04',
     titulo: 'Informe de caso en el Drive',

@@ -17,11 +17,13 @@ import {
   estudioDriveDe,
 } from '@/lib/drive';
 import {
+  esCodigoSiniestroValido,
   exportDriveExcel,
   indexarExistentes,
   parseDriveExcel,
   type DriveImportResult,
 } from '@/lib/driveExcel';
+import { DriveResumen } from './DriveResumen';
 import { baseInput, FField } from './ui/FormField';
 import { DriveInformeModal } from './DriveInformeModal';
 import { DriveDetalleModal } from './DriveDetalleModal';
@@ -43,6 +45,9 @@ export function DriveBoard() {
   const [exportando, setExportando] = useState(false);
   /** Caso abierto en el detalle (ahí vive la info que la tabla no muestra) */
   const [detalle, setDetalle] = useState<DriveSiniestro | null>(null);
+  /** Panel de limpieza de filas basura de importaciones viejas */
+  const [limpiando, setLimpiando] = useState(false);
+  const [mostrarResumen, setMostrarResumen] = useState(true);
 
   // Filtros
   const [filtroAnio, setFiltroAnio] = useState<string>('');
@@ -108,6 +113,45 @@ export function DriveBoard() {
     if (estudioUsuario === null) return registros;
     return registros.filter((r) => r.estudio === estudioUsuario);
   }, [registros, estudioUsuario]);
+
+  /**
+   * Filas que no son casos: importaciones viejas metieron bajo la columna
+   * SINIESTRO textos del informe (direcciones, "PLACA DEL VEHÍCULO TERCERO…").
+   * Se listan aparte para poder borrarlas de una vez.
+   */
+  const invalidos = useMemo(
+    () => visibles.filter((r) => !esCodigoSiniestroValido(r.siniestro)),
+    [visibles]
+  );
+
+  /** Borra las filas basura (solo Pacífico, que ve toda la base). */
+  async function borrarInvalidos() {
+    if (invalidos.length === 0) return;
+    const ids = invalidos.map((r) => r.id);
+    setLimpiando(false);
+    const LOTE = 200;
+    for (let i = 0; i < ids.length; i += LOTE) {
+      const { error } = await supabase
+        .from('drive_siniestros')
+        .delete()
+        .in('id', ids.slice(i, i + LOTE));
+      if (error) {
+        alert('Error al limpiar: ' + error.message);
+        break;
+      }
+    }
+    await cargar();
+  }
+
+  /**
+   * Lo que alimenta el resumen: todo lo que el usuario puede ver, acotado al
+   * estudio elegido. No usa los filtros de año/mes porque el resumen tiene su
+   * propio selector de periodo.
+   */
+  const registrosResumen = useMemo(() => {
+    if (esPacifico && filtroEstudio) return visibles.filter((r) => r.estudio === filtroEstudio);
+    return visibles;
+  }, [visibles, esPacifico, filtroEstudio]);
 
   const anios = useMemo(
     () =>
@@ -194,6 +238,21 @@ export function DriveBoard() {
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
+            onClick={() => setMostrarResumen((v) => !v)}
+            title="Mostrar u ocultar el resumen de abiertos y cerrados"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-medium transition',
+              mostrarResumen
+                ? 'border-white/[0.16] bg-white/[0.07] text-white'
+                : 'border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.06] hover:text-white'
+            )}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M3 12h3v5H3v-5zm5.5-5h3v10h-3V7zM14 3h3v14h-3V3z" />
+            </svg>
+            Resumen
+          </button>
+          <button
             onClick={onExportar}
             disabled={exportando || filtrados.length === 0}
             title="Descargar en Excel los casos visibles (según los filtros)"
@@ -271,6 +330,62 @@ export function DriveBoard() {
         </span>
       </div>
 
+      {/* Resumen de abiertos y cerrados (v13) */}
+      {!loading && mostrarResumen && estudioUsuario !== '__ninguno__' && (
+        <DriveResumen registros={registrosResumen} mostrarCorte={esPacifico} />
+      )}
+
+      {/* Filas basura de importaciones anteriores */}
+      {!loading && invalidos.length > 0 && (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3.5">
+          <div className="flex flex-wrap items-start gap-3">
+            <svg className="h-4 w-4 shrink-0 text-amber-300 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+            </svg>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-amber-200">
+                {invalidos.length.toLocaleString('es-PE')}{' '}
+                {invalidos.length === 1 ? 'fila no es un caso' : 'filas no son casos'}
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-400 leading-snug">
+                Entraron en una importación anterior: bajo la columna del número de siniestro venía
+                texto del informe (direcciones, placas de terceros). Ya no vuelve a pasar, pero
+                conviene sacarlas de la base.
+              </p>
+              <ul className="mt-1.5 space-y-0.5">
+                {invalidos.slice(0, 3).map((r) => (
+                  <li key={r.id} className="truncate text-[11px] text-slate-500">
+                    · {r.siniestro}
+                  </li>
+                ))}
+                {invalidos.length > 3 && (
+                  <li className="text-[11px] text-slate-600">
+                    …y {(invalidos.length - 3).toLocaleString('es-PE')} más.
+                  </li>
+                )}
+              </ul>
+            </div>
+            {esPacifico && (
+              <button
+                onClick={() => setLimpiando(true)}
+                className="shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/25 transition"
+              >
+                Limpiar
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {limpiando && (
+        <ConfirmarLimpieza
+          cantidad={invalidos.length}
+          ejemplos={invalidos.slice(0, 8).map((r) => r.siniestro)}
+          onCancelar={() => setLimpiando(false)}
+          onConfirmar={borrarInvalidos}
+        />
+      )}
+
       {/* Tabla por mes */}
       {loading ? (
         <div className="grid place-items-center py-20 text-slate-500">Cargando registros…</div>
@@ -340,6 +455,64 @@ export function DriveBoard() {
   );
 }
 
+/* ---------------- Confirmación de limpieza ---------------- */
+
+function ConfirmarLimpieza({
+  cantidad,
+  ejemplos,
+  onCancelar,
+  onConfirmar,
+}: {
+  cantidad: number;
+  ejemplos: string[];
+  onCancelar: () => void;
+  onConfirmar: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm fade-in p-4"
+      onClick={onCancelar}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-white/10 bg-ink-800 p-5 shadow-2xl text-slate-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-white">
+          Borrar {cantidad.toLocaleString('es-PE')} {cantidad === 1 ? 'fila' : 'filas'} del Drive
+        </h2>
+        <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+          No son casos: en la columna del número de siniestro tienen texto suelto. Se borran de la
+          base y no se pueden recuperar. Los casos con número válido no se tocan.
+        </p>
+        <div className="mt-3 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
+          {ejemplos.map((e, i) => (
+            <p key={i} className="truncate text-[11px] text-slate-400">{e}</p>
+          ))}
+          {cantidad > ejemplos.length && (
+            <p className="text-[11px] text-slate-600">
+              …y {(cantidad - ejemplos.length).toLocaleString('es-PE')} más.
+            </p>
+          )}
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={onConfirmar}
+            className="inline-flex items-center rounded-lg border border-red-500/40 bg-red-500/15 px-4 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/25 transition"
+          >
+            Sí, borrarlas
+          </button>
+          <button
+            onClick={onCancelar}
+            className="inline-flex items-center rounded-lg border border-white/[0.08] px-4 py-2 text-sm font-medium text-slate-400 hover:bg-white/[0.03] hover:text-slate-200 transition"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Sección por mes ---------------- */
 
 function MesSection({
@@ -402,9 +575,9 @@ function MesSection({
       </button>
 
       {abierto && (
-        <div className="overflow-x-auto">
+        <div className="max-h-[70vh] overflow-auto">
           <table className="w-full text-left text-xs">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-ink-800/95 backdrop-blur-sm">
               <tr className="border-t border-white/[0.06] text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                 <Th>Alertas</Th>
                 <Th>Siniestro</Th>
@@ -467,18 +640,18 @@ function MesSection({
                     </span>
                   </Td>
                   <Td className="font-mono font-semibold text-slate-100">
-                    <span className="inline-flex items-center gap-1.5">
-                      {r.siniestro}
+                    <span className="inline-flex max-w-[12rem] items-center gap-1.5">
+                      <span className="truncate" title={r.siniestro}>{r.siniestro}</span>
                       {fallecido && <FallecidoIcon className="h-3.5 w-3.5 text-red-400" />}
                       {retenida && <VehiculoIcon className="h-3.5 w-3.5 text-amber-400" />}
                     </span>
                   </Td>
-                  <Td className="font-mono text-slate-200">{r.placa_asegurado ?? '—'}</Td>
+                  <TdTexto valor={r.placa_asegurado} ancho="max-w-[9rem]" className="font-mono text-slate-200" />
                   {mostrarAnio && <Td>{r.anio ?? '—'}</Td>}
                   <Td>{r.fecha_registro ? formatFechaSolo(r.fecha_registro) : '—'}</Td>
-                  <Td>{r.distrito ?? '—'}</Td>
-                  <Td>{r.abogado ?? '—'}</Td>
-                  <Td>{r.lesion_principal ?? '—'}</Td>
+                  <TdTexto valor={r.distrito} ancho="max-w-[10rem]" />
+                  <TdTexto valor={r.abogado} ancho="max-w-[11rem]" />
+                  <TdTexto valor={r.lesion_principal} ancho="max-w-[12rem]" />
                   <Td>
                     {r.gravedad ? (
                       <span
@@ -498,7 +671,7 @@ function MesSection({
                   <Td className="text-right tabular-nums">{fmtMonto(r.reserva_inicial)}</Td>
                   <Td className="text-right tabular-nums">{fmtMonto(r.reserva_final)}</Td>
                   <Td className="text-right tabular-nums text-emerald-300/90">{fmtMonto(r.ahorro)}</Td>
-                  <Td>{r.sub_estado ?? '—'}</Td>
+                  <TdTexto valor={r.sub_estado} ancho="max-w-[12rem]" />
                   <Td>
                     <span
                       className={cn(
@@ -511,7 +684,7 @@ function MesSection({
                       {r.estado ?? '—'}
                     </span>
                   </Td>
-                  {esPacifico && <Td>{r.estudio}</Td>}
+                  {esPacifico && <TdTexto valor={r.estudio} ancho="max-w-[12rem]" />}
                   <Td className="text-right text-slate-500">
                     <span className="whitespace-nowrap text-[11px] font-medium">Ver detalle →</span>
                   </Td>
@@ -583,6 +756,29 @@ function Th({ children, className }: { children?: React.ReactNode; className?: s
 
 function Td({ children, className }: { children?: React.ReactNode; className?: string }) {
   return <td className={cn('px-3 py-2 whitespace-nowrap text-slate-300', className)}>{children}</td>;
+}
+
+/**
+ * Celda de texto libre (placa, distrito, lesión, sub estado). Corta lo que no
+ * entra en vez de estirar la fila: un valor sucio no descuadra toda la tabla.
+ */
+function TdTexto({
+  valor,
+  ancho = 'max-w-[14rem]',
+  className,
+}: {
+  valor: string | null | undefined;
+  ancho?: string;
+  className?: string;
+}) {
+  const v = valor?.trim() || '—';
+  return (
+    <td className={cn('px-3 py-2 text-slate-300', className)}>
+      <span className={cn('block truncate', ancho)} title={v === '—' ? undefined : v}>
+        {v}
+      </span>
+    </td>
+  );
 }
 
 /* ---------------- Modal Importar Excel ---------------- */
@@ -788,6 +984,11 @@ function ImportarDriveModal({
                     {resultado.sinCambios} sin cambios
                   </span>
                 )}
+                {resultado.omitidasSinCodigo > 0 && (
+                  <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-300">
+                    {resultado.omitidasSinCodigo} filas omitidas (no son casos)
+                  </span>
+                )}
                 {resultado.errores.length > 0 && (
                   <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-[11px] font-medium text-red-300">
                     {resultado.errores.length} filas con problemas
@@ -798,6 +999,13 @@ function ImportarDriveModal({
               {resultado.columnasIgnoradas.length > 0 && (
                 <p className="text-[11px] text-slate-500">
                   Columnas no reconocidas (se ignoran): {resultado.columnasIgnoradas.join(' · ')}
+                </p>
+              )}
+
+              {resultado.omitidasSinCodigo > 0 && (
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  Las filas omitidas traían texto donde va el número de siniestro (líneas del
+                  informe, notas al pie, encabezados repetidos). No entran al Drive.
                 </p>
               )}
 

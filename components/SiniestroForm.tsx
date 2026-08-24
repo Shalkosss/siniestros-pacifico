@@ -8,6 +8,7 @@ import type { Moneda, Siniestro, TipoDocumento, TipoSiniestro, Usuario } from '@
 import { cn, formatMoneda, validarCodigo } from '@/lib/utils';
 import { getResponsableDeEtapa } from '@/lib/workflows';
 import { puedeCrearSiniestro } from '@/lib/permissions';
+import { admiteUber, UBER_ACCENT, UBER_TEXT } from '@/lib/uber';
 import {
   buildAsunto,
   buildCuerpo,
@@ -18,6 +19,10 @@ import {
 
 const EMAIL_PROVIDER_KEY = 'pacifico:email-provider';
 const EMAIL_AUTOSEND_KEY = 'pacifico:email-autosend';
+/** Borrador del formulario — sobrevive a cerrar la pestaña o suspender el equipo */
+const BORRADOR_KEY = 'pacifico:borrador-siniestro';
+/** Un borrador más viejo que esto ya no se ofrece */
+const BORRADOR_VIGENCIA_MS = 7 * 24 * 60 * 60 * 1000;
 
 const PROVIDER_LABEL: Record<EmailProvider, string> = {
   gmail: 'Gmail',
@@ -32,7 +37,7 @@ const TIPOS: {
 }[] = [
   { id: 'pago',         label: 'Pago',          descripcion: 'Al asegurado o tercero' },
   { id: 'deducible',    label: 'Deducible',     descripcion: 'Cobro al asegurado' },
-  { id: 'valorizacion', label: 'Valorización',  descripcion: 'Valorización de daños' },
+  { id: 'valorizacion', label: 'Valorización',  descripcion: 'Se registra en el Drive' },
   { id: 'info_poliza',  label: 'Info Póliza',   descripcion: 'Consulta de póliza' },
   { id: 'reembolso',    label: 'Reembolso',     descripcion: 'Reembolso de gastos' },
 ];
@@ -67,6 +72,64 @@ const baseInput =
 /** Fila de beneficiario en el formulario (monto como string mientras se escribe) */
 type BenForm = { nombre: string; dni: string; tipo: TipoDocumento; monto: string };
 
+/**
+ * Borrador del formulario guardado en el navegador. Se escribe con cada tecla,
+ * así que si se cierra la pestaña, se corta la luz o se suspende el equipo, al
+ * volver está todo lo que se había llenado. Los archivos adjuntos no se pueden
+ * guardar (el navegador no lo permite): hay que volver a elegirlos.
+ */
+interface Borrador {
+  v: 1;
+  ts: number;
+  usuario: string;
+  tipo: TipoSiniestro;
+  codigo: string;
+  monto: string;
+  moneda: Moneda;
+  aseguradoNombre: string;
+  dniTercero: string;
+  docTipo: TipoDocumento;
+  correoAsegurado: string;
+  esCheque: boolean;
+  chequeBanco: string;
+  chequePersona: string;
+  chequeDni: string;
+  esPagoCuenta: boolean;
+  reembolsoA: 'asegurado' | 'abogado';
+  variosBeneficiarios: boolean;
+  beneficiarios: BenForm[];
+  esUber: boolean;
+  solicitanteOverride: string;
+  agregarNota: boolean;
+  notas: string;
+}
+
+/** ¿El borrador tiene algo que valga la pena recuperar? */
+function borradorTieneContenido(b: Borrador): boolean {
+  return !!(
+    b.codigo ||
+    b.monto ||
+    b.aseguradoNombre ||
+    b.dniTercero ||
+    b.correoAsegurado ||
+    b.notas ||
+    b.chequeBanco ||
+    b.chequePersona ||
+    b.chequeDni ||
+    b.beneficiarios.some((x) => x.nombre || x.dni || x.monto)
+  );
+}
+
+/** "hace 5 min", "hace 2 h", "el 21 ago" */
+function haceCuanto(d: Date): string {
+  const min = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (min < 1) return 'hace un momento';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  return `el ${d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}`;
+}
+
 interface Props {
   abogados: Usuario[];
 }
@@ -98,6 +161,8 @@ export function SiniestroForm({ abogados }: Props) {
     { nombre: '', dni: '', tipo: 'DNI', monto: '' },
     { nombre: '', dni: '', tipo: 'DNI', monto: '' },
   ]);
+  // UBER — categoría dentro de pagos/reembolsos (v13). Los de 8 dígitos van a Katty.
+  const [esUberCaso, setEsUberCaso] = useState(false);
   const [solicitanteOverride, setSolicitanteOverride] = useState('');
   const [agregarNota, setAgregarNota] = useState(false);
   const [notas, setNotas] = useState('');
@@ -108,6 +173,10 @@ export function SiniestroForm({ abogados }: Props) {
   const [creado, setCreado] = useState<Siniestro | null>(null);
   const [emailProvider, setEmailProvider] = useState<EmailProvider>('gmail');
   const [autoEnviar, setAutoEnviar] = useState(false);
+  /** Fecha del borrador recuperado (null = no se recuperó nada) */
+  const [borradorDe, setBorradorDe] = useState<Date | null>(null);
+  /** Hasta que no se intente recuperar, no se guarda nada (evita pisar el borrador) */
+  const [borradorListo, setBorradorListo] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -116,12 +185,152 @@ export function SiniestroForm({ abogados }: Props) {
     setAutoEnviar(localStorage.getItem(EMAIL_AUTOSEND_KEY) === '1');
   }, []);
 
+  /* ---- Borrador: recuperar lo que se estaba llenando ---- */
+  useEffect(() => {
+    if (typeof window === 'undefined' || !usuario) return;
+    try {
+      const crudo = localStorage.getItem(BORRADOR_KEY);
+      const b = crudo ? (JSON.parse(crudo) as Borrador) : null;
+      if (b && b.v === 1 && b.usuario === usuario.nombre && Date.now() - b.ts < BORRADOR_VIGENCIA_MS) {
+        aplicarBorrador(b);
+        setBorradorDe(new Date(b.ts));
+      } else if (b) {
+        localStorage.removeItem(BORRADOR_KEY);
+      }
+    } catch {
+      localStorage.removeItem(BORRADOR_KEY);
+    }
+    setBorradorListo(true);
+    // Solo al montar / al resolverse el usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuario?.nombre]);
+
+  function aplicarBorrador(b: Borrador) {
+    setTipo(b.tipo);
+    setCodigo(b.codigo);
+    setMonto(b.monto);
+    setMoneda(b.moneda);
+    setAseguradoNombre(b.aseguradoNombre);
+    setDniTercero(b.dniTercero);
+    setDocTipo(b.docTipo);
+    setCorreoAsegurado(b.correoAsegurado);
+    setEsCheque(b.esCheque);
+    setChequeBanco(b.chequeBanco);
+    setChequePersona(b.chequePersona);
+    setChequeDni(b.chequeDni);
+    setEsPagoCuenta(b.esPagoCuenta);
+    setReembolsoA(b.reembolsoA);
+    setVariosBeneficiarios(b.variosBeneficiarios);
+    if (b.beneficiarios.length >= 2) setBeneficiarios(b.beneficiarios);
+    setEsUberCaso(b.esUber);
+    setSolicitanteOverride(b.solicitanteOverride);
+    setAgregarNota(b.agregarNota);
+    setNotas(b.notas);
+  }
+
+  /** Borra el borrador guardado (al crear el siniestro o al empezar de cero) */
+  function limpiarBorrador() {
+    if (typeof window !== 'undefined') localStorage.removeItem(BORRADOR_KEY);
+    setBorradorDe(null);
+  }
+
+  function empezarDeCero() {
+    limpiarBorrador();
+    setTipo('pago');
+    setCodigo('');
+    setMonto('');
+    setMoneda('PEN');
+    setAseguradoNombre('');
+    setDniTercero('');
+    setDocTipo('DNI');
+    setCorreoAsegurado('');
+    setEsCheque(false);
+    setChequeBanco('');
+    setChequePersona('');
+    setChequeDni('');
+    setEsPagoCuenta(false);
+    setReembolsoA('asegurado');
+    setVariosBeneficiarios(false);
+    setBeneficiarios([
+      { nombre: '', dni: '', tipo: 'DNI', monto: '' },
+      { nombre: '', dni: '', tipo: 'DNI', monto: '' },
+    ]);
+    setEsUberCaso(false);
+    setSolicitanteOverride('');
+    setAgregarNota(false);
+    setNotas('');
+    setError(null);
+  }
+
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem(EMAIL_PROVIDER_KEY, emailProvider);
   }, [emailProvider]);
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem(EMAIL_AUTOSEND_KEY, autoEnviar ? '1' : '0');
   }, [autoEnviar]);
+
+  /* ---- Borrador: guardar con cada cambio ---- */
+  useEffect(() => {
+    if (!borradorListo || typeof window === 'undefined' || !usuario) return;
+    const b: Borrador = {
+      v: 1,
+      ts: Date.now(),
+      usuario: usuario.nombre,
+      tipo,
+      codigo,
+      monto,
+      moneda,
+      aseguradoNombre,
+      dniTercero,
+      docTipo,
+      correoAsegurado,
+      esCheque,
+      chequeBanco,
+      chequePersona,
+      chequeDni,
+      esPagoCuenta,
+      reembolsoA,
+      variosBeneficiarios,
+      beneficiarios,
+      esUber: esUberCaso,
+      solicitanteOverride,
+      agregarNota,
+      notas,
+    };
+    // Un formulario en blanco no es un borrador: no ensucia el localStorage.
+    if (!borradorTieneContenido(b)) {
+      localStorage.removeItem(BORRADOR_KEY);
+      return;
+    }
+    try {
+      localStorage.setItem(BORRADOR_KEY, JSON.stringify(b));
+    } catch {
+      // Sin espacio o modo privado: seguimos sin autoguardado.
+    }
+  }, [
+    borradorListo,
+    usuario,
+    tipo,
+    codigo,
+    monto,
+    moneda,
+    aseguradoNombre,
+    dniTercero,
+    docTipo,
+    correoAsegurado,
+    esCheque,
+    chequeBanco,
+    chequePersona,
+    chequeDni,
+    esPagoCuenta,
+    reembolsoA,
+    variosBeneficiarios,
+    beneficiarios,
+    esUberCaso,
+    solicitanteOverride,
+    agregarNota,
+    notas,
+  ]);
 
   if (!puedeCrearSiniestro(usuario)) {
     return (
@@ -134,8 +343,10 @@ export function SiniestroForm({ abogados }: Props) {
   const solicitante = solicitanteOverride || usuario!.nombre;
   const focusClass = inputFocusStyle[tipo];
 
-  // Valorización e Info Póliza solo requieren el número de siniestro.
-  const soloCodigo = tipo === 'valorizacion' || tipo === 'info_poliza';
+  // Valorización ya no se registra aquí: vive en el Drive de Siniestros (v13).
+  const esValorizacion = tipo === 'valorizacion';
+  // Info Póliza solo requiere el número de siniestro.
+  const soloCodigo = tipo === 'info_poliza';
   const puedeSerCheque = tipo === 'pago';
   // Pago en cuenta y beneficiarios múltiples aplican a pagos y reembolsos
   const puedeSerPagoCuenta = tipo === 'pago' || tipo === 'reembolso';
@@ -158,6 +369,7 @@ export function SiniestroForm({ abogados }: Props) {
   const montoTotalVarios = beneficiariosLlenos.reduce((acc, b) => acc + b.monto, 0);
 
   function validar(): string | null {
+    if (esValorizacion) return 'Las valorizaciones se registran en el Drive de Siniestros.';
     if (!validarCodigo(codigo)) return 'El código debe tener exactamente 8 o 10 dígitos numéricos.';
     if (soloCodigo) return null;
     if (!usaVarios && (!monto || isNaN(Number(monto)) || Number(monto) <= 0)) return 'Ingresa un monto válido mayor a 0.';
@@ -206,10 +418,14 @@ export function SiniestroForm({ abogados }: Props) {
     setSubmitting(true);
 
     const estadoInicial = 'Solicitud recibida';
-    const responsable = getResponsableDeEtapa(tipo, estadoInicial, { codigo });
+    const responsable = getResponsableDeEtapa(tipo, estadoInicial, {
+      codigo,
+      es_uber: admiteUber(tipo) && esUberCaso,
+    });
 
     const cheque = puedeSerCheque && esCheque;
     const pagoCuenta = puedeSerPagoCuenta && esPagoCuenta;
+    const uber = admiteUber(tipo) && esUberCaso;
     // Con varios beneficiarios, el primero se refleja en los campos clásicos
     const bens = !soloCodigo && usaVarios ? beneficiariosLlenos : null;
 
@@ -240,6 +456,8 @@ export function SiniestroForm({ abogados }: Props) {
       ...(!esReembolsoAbogado && (bens ? bens[0].tipo : docTipo) === 'CE' ? { doc_tipo: 'CE' } : {}),
       // v9 — reembolso a abogado
       ...(esReembolsoAbogado ? { reembolso_abogado: true } : {}),
+      // v13 — categoría UBER (los de 8 dígitos los gestiona Katty)
+      ...(uber ? { es_uber: true } : {}),
     };
 
     const { data: created, error: insErr } = await supabase
@@ -285,6 +503,9 @@ export function SiniestroForm({ abogados }: Props) {
 
     const siniestroFinal = { ...(created as Siniestro), pdf_urls: pdfUrls };
 
+    // Ya está guardado en la base: el borrador local deja de tener sentido.
+    limpiarBorrador();
+
     if (autoEnviar) {
       // Dispara el cliente de correo y marca como enviado de inmediato.
       await supabase.from('siniestros').update({
@@ -319,37 +540,74 @@ export function SiniestroForm({ abogados }: Props) {
     );
   }
 
+  const selectorTipo = (
+    <div>
+      <Label>Tipo de siniestro</Label>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+        {TIPOS.map((t) => {
+          const active = tipo === t.id;
+          return (
+            <button
+              type="button"
+              key={t.id}
+              onClick={() => setTipo(t.id)}
+              className={cn(
+                'rounded-lg border px-3 py-2.5 text-left transition',
+                active
+                  ? tipoActiveStyle[t.id]
+                  : 'bg-card border-white/[0.06] text-slate-400 hover:bg-card-hover hover:text-slate-200'
+              )}
+            >
+              <div className={cn('text-sm font-semibold', active ? 'text-current' : 'text-slate-200')}>
+                {t.label}
+              </div>
+              <div className="text-[11px] mt-0.5 opacity-70">
+                {t.descripcion}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const bannerBorrador = borradorDe && (
+    <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/[0.07] px-3 py-2.5 flex items-start gap-2.5">
+      <svg className="h-4 w-4 shrink-0 text-cyan-300 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586l-1.293 1.293a1 1 0 101.414 1.414l1.586-1.586A1 1 0 0011 11V7z" clipRule="evenodd" />
+      </svg>
+      <div className="min-w-0 flex-1 text-xs text-slate-300 leading-snug">
+        Recuperamos lo que estabas llenando <span className="text-slate-100">{haceCuanto(borradorDe)}</span>.
+        <span className="block text-[11px] text-slate-500 mt-0.5">
+          Se guarda solo en este navegador mientras escribes. Los archivos adjuntos hay que volver a elegirlos.
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={empezarDeCero}
+        className="shrink-0 rounded-md border border-white/[0.08] px-2 py-1 text-[11px] font-medium text-slate-400 hover:bg-white/[0.05] hover:text-slate-200 transition"
+      >
+        Empezar de cero
+      </button>
+    </div>
+  );
+
+  // Valorización: no se registra en el tablero, se agrega al Drive de Siniestros.
+  if (esValorizacion) {
+    return (
+      <div className="space-y-5">
+        {selectorTipo}
+        <ValorizacionDrive onIrAlDrive={() => router.push('/drive')} onVolver={() => setTipo('pago')} />
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-5">
+      {bannerBorrador}
+
       {/* Tipo de siniestro */}
-      <div>
-        <Label>Tipo de siniestro</Label>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-          {TIPOS.map((t) => {
-            const active = tipo === t.id;
-            return (
-              <button
-                type="button"
-                key={t.id}
-                onClick={() => setTipo(t.id)}
-                className={cn(
-                  'rounded-lg border px-3 py-2.5 text-left transition',
-                  active
-                    ? tipoActiveStyle[t.id]
-                    : 'bg-card border-white/[0.06] text-slate-400 hover:bg-card-hover hover:text-slate-200'
-                )}
-              >
-                <div className={cn('text-sm font-semibold', active ? 'text-current' : 'text-slate-200')}>
-                  {t.label}
-                </div>
-                <div className="text-[11px] mt-0.5 opacity-70">
-                  {t.descripcion}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {selectorTipo}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field
@@ -402,7 +660,7 @@ export function SiniestroForm({ abogados }: Props) {
 
       {soloCodigo && (
         <p className="rounded-lg border border-white/[0.06] bg-card/50 p-3 text-xs text-slate-400">
-          Para {tipo === 'valorizacion' ? 'valorizaciones' : 'información de póliza'} solo se necesita el número de siniestro.
+          Para información de póliza solo se necesita el número de siniestro.
         </p>
       )}
 
@@ -611,6 +869,48 @@ export function SiniestroForm({ abogados }: Props) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* UBER — categoría dentro de Pagos / Reembolsos (v13) */}
+      {admiteUber(tipo) && (
+        <div
+          className={cn(
+            'rounded-lg border p-3',
+            esUberCaso
+              ? 'border-[rgba(111,156,126,0.4)] bg-[rgba(111,156,126,0.07)]'
+              : 'border-white/[0.06] bg-card/50'
+          )}
+        >
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <span
+              onClick={() => setEsUberCaso((v) => !v)}
+              className={cn(
+                'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition',
+                esUberCaso ? 'border-transparent' : 'border-slate-600 bg-card'
+              )}
+              style={esUberCaso ? { background: UBER_ACCENT } : undefined}
+            >
+              {esUberCaso && (
+                <svg className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                </svg>
+              )}
+            </span>
+            <input
+              type="checkbox"
+              checked={esUberCaso}
+              onChange={(e) => setEsUberCaso(e.target.checked)}
+              className="sr-only"
+            />
+            <span className="text-xs text-slate-300 leading-snug">
+              Este {tipo === 'pago' ? 'pago' : 'reembolso'} es de{' '}
+              <strong style={{ color: UBER_TEXT }}>UBER</strong>
+              <span className="block text-[11px] text-slate-500 mt-0.5">
+                Se distingue en el tablero. Los de 8 dígitos los gestiona Katty.
+              </span>
+            </span>
+          </label>
         </div>
       )}
 
@@ -897,12 +1197,92 @@ export function SiniestroForm({ abogados }: Props) {
         <button
           type="button"
           onClick={() => router.push('/')}
+          title="Se guarda lo llenado: al volver a esta pantalla sigue aquí."
           className="inline-flex items-center justify-center rounded-lg border border-white/[0.08] bg-transparent px-4 py-2 text-sm font-medium text-slate-400 hover:bg-white/[0.03] hover:text-slate-200 transition"
         >
           Cancelar
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (confirm('¿Descartar todo lo llenado?')) empezarDeCero();
+          }}
+          className="ml-auto inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:text-slate-300 transition"
+        >
+          Limpiar formulario
+        </button>
       </div>
     </form>
+  );
+}
+
+/* ---------------- Valorización: se registra en el Drive ---------------- */
+
+/**
+ * Las valorizaciones no viven en el tablero de Pagos: van al Drive de
+ * Siniestros, sobre el caso (SV) que ya existe ahí. La opción se mantiene en el
+ * selector para que nadie la busque en otro lado, pero lo que hace es explicar
+ * el flujo y llevar al Drive.
+ */
+function ValorizacionDrive({
+  onIrAlDrive,
+  onVolver,
+}: {
+  onIrAlDrive: () => void;
+  onVolver: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] p-5 space-y-4 slide-in">
+      <div className="flex items-start gap-3">
+        <svg className="h-5 w-5 shrink-0 text-emerald-300 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M3 4a2 2 0 012-2h4l2 2h4a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V4z" />
+        </svg>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-emerald-200">
+            Las valorizaciones se hacen desde el Drive de Siniestros
+          </h3>
+          <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+            No se registran como una tarjeta del tablero. Se agregan sobre el caso que ya está en el
+            Drive, para que la valorización quede junto al resto del expediente.
+          </p>
+        </div>
+      </div>
+
+      <ol className="space-y-2 text-xs text-slate-300">
+        {[
+          'Entra al Drive de Siniestros.',
+          'Busca tu SV por número de siniestro, placa o abogado.',
+          'Abre el caso y agrega ahí la valorización con sus montos y sustento.',
+        ].map((paso, i) => (
+          <li key={i} className="flex items-start gap-2.5">
+            <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-[10px] font-bold text-emerald-300">
+              {i + 1}
+            </span>
+            <span className="leading-snug">{paso}</span>
+          </li>
+        ))}
+      </ol>
+
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onIrAlDrive}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30 transition"
+        >
+          Ir al Drive de Siniestros
+          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.06 10 7.23 6.29a.75.75 0 111.04-1.08l4.39 4.25a.75.75 0 010 1.08l-4.39 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={onVolver}
+          className="inline-flex items-center rounded-lg border border-white/[0.08] px-4 py-2 text-sm font-medium text-slate-400 hover:bg-white/[0.03] hover:text-slate-200 transition"
+        >
+          Registrar otro tipo
+        </button>
+      </div>
+    </div>
   );
 }
 
